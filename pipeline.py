@@ -47,8 +47,6 @@ class DataPreprocessor:
     ):
 
         self.target_col = target_col
-
-        # Automatically detect if None
         self.task = task
 
         self.rare_label_threshold = rare_label_threshold
@@ -75,34 +73,49 @@ class DataPreprocessor:
 
         self.categorical_features = []
 
-        # Full training target encoding mappings
         self.label_mappings = {}
 
-        # Global target mean
         self.global_target_mean = None
 
-        # Learned skew information
         self.skewed_features = []
 
-        # Shift values for negative skewed features
         self.skew_shifts = {}
 
-        # Feature structure before selection
         self.feature_columns = []
 
-        # Numeric columns to scale
         self.scalable_features = []
 
-        # Feature selector
         self.feature_selector = None
 
-        # Final selected feature names
         self.selected_features = []
 
-        # Scaler
         self.scaler = None
 
         self.fitted = False
+
+    # ======================================================
+    # CATEGORICAL DETECTION
+    # ======================================================
+
+    def _get_categorical_features(self, X):
+        """
+        Universal categorical-column detection.
+
+        Handles:
+            - object
+            - string
+            - category
+        """
+
+        return [
+            col
+            for col in X.columns
+            if (
+                pd.api.types.is_object_dtype(X[col])
+                or pd.api.types.is_string_dtype(X[col])
+                or pd.api.types.is_categorical_dtype(X[col])
+            )
+        ]
 
     # ======================================================
     # TASK DETECTION
@@ -120,7 +133,10 @@ class DataPreprocessor:
             otherwise -> regression
         """
 
-        if y.dtype == "object":
+        if (
+            pd.api.types.is_object_dtype(y)
+            or pd.api.types.is_string_dtype(y)
+        ):
             return "classification"
 
         if pd.api.types.is_bool_dtype(y):
@@ -143,16 +159,6 @@ class DataPreprocessor:
 
         """
         Detect columns where every value is unique.
-
-        Example:
-            Id
-            CustomerID
-            TransactionID
-            UUID
-            RowNumber
-
-        The target is already removed before this method
-        is called.
         """
 
         self.id_cols = []
@@ -177,10 +183,14 @@ class DataPreprocessor:
             if X[col].isnull().sum() > 0
         ]
 
+        categorical_features = (
+            self._get_categorical_features(X)
+        )
+
         self.features_nan_cat = [
             col
             for col in self.features_with_nan
-            if X[col].dtype == "object"
+            if col in categorical_features
         ]
 
         self.features_nan_num = [
@@ -253,11 +263,9 @@ class DataPreprocessor:
 
     def _fit_rare_labels(self, X):
 
-        self.categorical_features = [
-            col
-            for col in X.columns
-            if X[col].dtype == "object"
-        ]
+        self.categorical_features = (
+            self._get_categorical_features(X)
+        )
 
         self.frequent_labels = {}
 
@@ -367,20 +375,11 @@ class DataPreprocessor:
 
         """
         Learn target means from TRAINING DATA ONLY.
-
-        These mappings are used for:
-            - test data
-            - future/new data
-
-        Training rows themselves use leave-one-out
-        encoding to avoid using their own target.
         """
 
-        categorical_features = [
-            col
-            for col in X.columns
-            if X[col].dtype == "object"
-        ]
+        categorical_features = (
+            self._get_categorical_features(X)
+        )
 
         self.global_target_mean = y.mean()
 
@@ -410,10 +409,7 @@ class DataPreprocessor:
     ):
 
         """
-        Leave-one-out target encoding for TRAINING data.
-
-        A row does NOT use its own target when computing
-        its encoded category value.
+        Leave-one-out target encoding for training data.
         """
 
         X = X.copy()
@@ -425,9 +421,7 @@ class DataPreprocessor:
             if feature not in X.columns:
                 continue
 
-            mapping = self.label_mappings[
-                feature
-            ]
+            mapping = self.label_mappings[feature]
 
             encoded_values = []
 
@@ -445,7 +439,6 @@ class DataPreprocessor:
                         category
                     ]["count"]
 
-                    # Remove current row's target
                     other_sum = (
                         category_sum - y_array[i]
                     )
@@ -482,7 +475,7 @@ class DataPreprocessor:
     def _apply_target_encoding(self, X):
 
         """
-        Target encoding for TEST / NEW data.
+        Target encoding for test/new data.
 
         Uses only mappings learned from training data.
         """
@@ -494,9 +487,7 @@ class DataPreprocessor:
             if feature not in X.columns:
                 continue
 
-            mapping = self.label_mappings[
-                feature
-            ]
+            mapping = self.label_mappings[feature]
 
             def encode_value(category):
 
@@ -528,6 +519,61 @@ class DataPreprocessor:
         return X
 
     # ======================================================
+    # FINAL CATEGORICAL SAFETY
+    # ======================================================
+
+    def _ensure_numeric(self, X):
+
+        """
+        Final safety check.
+
+        No categorical/string column is allowed to reach
+        scaling or feature selection.
+        """
+
+        categorical_features = (
+            self._get_categorical_features(X)
+        )
+
+        if categorical_features:
+
+            raise ValueError(
+                "Categorical features remain after "
+                "target encoding: "
+                f"{categorical_features}"
+            )
+
+        # Convert boolean columns to integers
+        boolean_features = [
+            col
+            for col in X.columns
+            if pd.api.types.is_bool_dtype(X[col])
+        ]
+
+        for feature in boolean_features:
+
+            X[feature] = (
+                X[feature].astype(int)
+            )
+
+        # Final numeric validation
+        non_numeric_features = [
+            col
+            for col in X.columns
+            if not pd.api.types.is_numeric_dtype(X[col])
+        ]
+
+        if non_numeric_features:
+
+            raise ValueError(
+                "Non-numeric features remain before "
+                "scaling: "
+                f"{non_numeric_features}"
+            )
+
+        return X
+
+    # ======================================================
     # FEATURE ALIGNMENT
     # ======================================================
 
@@ -535,14 +581,12 @@ class DataPreprocessor:
 
         X = X.copy()
 
-        # Add missing columns
         for feature in self.feature_columns:
 
             if feature not in X.columns:
 
                 X[feature] = 0
 
-        # Remove unexpected columns
         X = X[
             self.feature_columns
         ]
@@ -577,15 +621,12 @@ class DataPreprocessor:
         X = X.copy()
 
         if not self.scale_features:
-
             return X
 
         if self.scaler is None:
-
             return X
 
         if not self.scalable_features:
-
             return X
 
         X[
@@ -655,7 +696,6 @@ class DataPreprocessor:
             if selected
         ]
 
-        # Safety fallback
         if len(self.selected_features) == 0:
 
             raise ValueError(
@@ -668,7 +708,6 @@ class DataPreprocessor:
 
         X = X.copy()
 
-        # Make sure every selected feature exists
         for feature in self.selected_features:
 
             if feature not in X.columns:
@@ -691,18 +730,6 @@ class DataPreprocessor:
 
         """
         FIT ONLY on training data.
-
-        This learns:
-            - ID columns
-            - missing-value rules
-            - medians
-            - rare categories
-            - skewed features
-            - target encoding mappings
-            - scaler
-            - feature selector
-
-        It does NOT touch X_test.
         """
 
         X_train = X_train.copy()
@@ -711,10 +738,6 @@ class DataPreprocessor:
             y_train,
             index=X_train.index
         )
-
-        # ------------------------------------------
-        # Validate
-        # ------------------------------------------
 
         if len(X_train) != len(y_train):
 
@@ -734,14 +757,13 @@ class DataPreprocessor:
             )
 
         # ------------------------------------------
-        # Detect IDs
+        # IDs
         # ------------------------------------------
 
         self._detect_ids(
             X_train
         )
 
-        # Remove IDs
         X = X_train.drop(
             columns=self.id_cols,
             errors="ignore"
@@ -788,36 +810,16 @@ class DataPreprocessor:
             y_train
         )
 
-        # IMPORTANT:
-        # Training gets leave-one-out encoding.
         X = self._apply_target_encoding_train(
             X,
             y_train
         )
 
         # ------------------------------------------
-        # Ensure numeric
+        # Final numeric conversion/check
         # ------------------------------------------
 
-        remaining_categorical = [
-            col
-            for col in X.columns
-            if X[col].dtype == "object"
-        ]
-
-        if remaining_categorical:
-
-            # This should normally be empty because
-            # target encoding handles categoricals.
-            #
-            # Fallback to one-hot encoding if
-            # anything remains.
-
-            X = pd.get_dummies(
-                X,
-                columns=remaining_categorical,
-                drop_first=True
-            )
+        X = self._ensure_numeric(X)
 
         # ------------------------------------------
         # Save feature structure
@@ -856,13 +858,6 @@ class DataPreprocessor:
         self,
         X
     ):
-
-        """
-        Transform new data using ONLY parameters learned
-        during fit().
-
-        No fitting happens here.
-        """
 
         if not self.fitted:
 
@@ -927,10 +922,16 @@ class DataPreprocessor:
         X = self._apply_target_encoding(X)
 
         # ------------------------------------------
-        # Align with training structure
+        # Align
         # ------------------------------------------
 
         X = self._align_features(X)
+
+        # ------------------------------------------
+        # Numeric safety
+        # ------------------------------------------
+
+        X = self._ensure_numeric(X)
 
         # ------------------------------------------
         # Scaling
@@ -957,22 +958,16 @@ class DataPreprocessor:
     ):
 
         """
-        Fit the pipeline on training data and return
-        the correctly encoded/scaled/selected training data.
+        Fit pipeline on training data and return
+        processed training data.
 
-        This uses leave-one-out target encoding for
-        training rows to avoid target leakage.
+        Uses leave-one-out target encoding.
         """
 
         self.fit(
             X_train,
             y_train
         )
-
-        # We cannot simply call transform() here because
-        # transform() intentionally uses the full training
-        # target mapping, which would leak each row's own
-        # target into its encoded feature.
 
         X = X_train.copy()
 
@@ -1010,7 +1005,7 @@ class DataPreprocessor:
         X = self._apply_skewness(X)
 
         # ------------------------------------------
-        # Target encoding WITHOUT self-target
+        # Target encoding
         # ------------------------------------------
 
         X = self._apply_target_encoding_train(
@@ -1023,6 +1018,12 @@ class DataPreprocessor:
         # ------------------------------------------
 
         X = self._align_features(X)
+
+        # ------------------------------------------
+        # Numeric safety
+        # ------------------------------------------
+
+        X = self._ensure_numeric(X)
 
         # ------------------------------------------
         # Scaling
@@ -1095,18 +1096,9 @@ if __name__ == "__main__":
 
     from sklearn.model_selection import train_test_split
 
-    # ------------------------------------------------------
-    # CONFIG
-    # ------------------------------------------------------
-
     INPUT_FILE = "train.csv"
 
     TARGET_COL = "SalePrice"
-
-
-    # ------------------------------------------------------
-    # LOAD
-    # ------------------------------------------------------
 
     print("=" * 60)
     print("LOADING DATA")
@@ -1120,30 +1112,21 @@ if __name__ == "__main__":
         f"Dataset shape: {df.shape}"
     )
 
-
-    # ------------------------------------------------------
-    # SPLIT
-    # ------------------------------------------------------
-
     X = df.drop(
         columns=[TARGET_COL]
     )
 
     y = df[TARGET_COL]
 
-
     processor = DataPreprocessor(
         target_col=TARGET_COL
     )
 
-
-    # Detect task before choosing stratification
     task = processor._detect_task(y)
 
     print(
         f"Detected task: {task}"
     )
-
 
     if task == "classification":
 
@@ -1168,7 +1151,6 @@ if __name__ == "__main__":
             )
         )
 
-
     print(
         f"X_train: {X_train.shape}"
     )
@@ -1176,7 +1158,6 @@ if __name__ == "__main__":
     print(
         f"X_test : {X_test.shape}"
     )
-
 
     # ------------------------------------------------------
     # FIT + TRANSFORM TRAIN
@@ -1193,7 +1174,6 @@ if __name__ == "__main__":
         )
     )
 
-
     # ------------------------------------------------------
     # TRANSFORM TEST
     # ------------------------------------------------------
@@ -1208,9 +1188,8 @@ if __name__ == "__main__":
         )
     )
 
-
     # ------------------------------------------------------
-    # ADD TARGET TO TRAIN
+    # ADD TARGET
     # ------------------------------------------------------
 
     train_output = (
@@ -1221,9 +1200,8 @@ if __name__ == "__main__":
         y_train.values
     )
 
-
     # ------------------------------------------------------
-    # ADD IDS BACK
+    # ADD IDS
     # ------------------------------------------------------
 
     train_ids = pd.DataFrame(
@@ -1236,7 +1214,6 @@ if __name__ == "__main__":
 
             train_ids[col] = X_train[col]
 
-
     if not train_ids.empty:
 
         train_output = pd.concat(
@@ -1247,9 +1224,7 @@ if __name__ == "__main__":
             axis=1
         )
 
-
     test_output = X_test_processed.copy()
-
 
     if not test_ids.empty:
 
@@ -1260,7 +1235,6 @@ if __name__ == "__main__":
             ],
             axis=1
         )
-
 
     # ------------------------------------------------------
     # SAVE
@@ -1275,7 +1249,6 @@ if __name__ == "__main__":
         "X_test.csv",
         index=False
     )
-
 
     # ------------------------------------------------------
     # INFO
