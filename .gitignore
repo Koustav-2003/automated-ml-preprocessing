@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Data files
+*.csv
+*.xlsx
+*.xls
+*.parquet
+
+# Generated files
+*.zip
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment variables
+.env
+
+# OS
+.DS_Store
+Thumbs.db
