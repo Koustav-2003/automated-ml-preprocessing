@@ -7,7 +7,7 @@ import requests
 # CONFIG
 # =========================================================
 
-API_URL = "http://127.0.0.1:8000/process"
+API_URL = "https://automated-ml-preprocessing-api.onrender.com/process"
 
 
 # =========================================================
