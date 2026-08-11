@@ -9,35 +9,10 @@ from sklearn.feature_selection import SelectFromModel
 
 
 class DataPreprocessor:
-    """
-    Universal supervised preprocessing pipeline.
-
-    Pipeline:
-        1. Detect ID-like columns
-        2. Create missing-value indicators
-        3. Handle numerical missing values
-        4. Handle categorical missing values
-        5. Group rare categorical labels
-        6. Handle skewed numerical features
-        7. Target-guided categorical encoding
-        8. MinMax scaling
-        9. L1-based feature selection
-
-    Supported:
-        - Regression
-        - Classification
-
-    IMPORTANT:
-        All learned preprocessing parameters come ONLY from
-        training data.
-
-        Test/new data is transformed using those learned
-        parameters and never used to fit anything.
-    """
 
     def __init__(
         self,
-        target_col,
+        target_col=None,
         task=None,
         rare_label_threshold=0.01,
         skew_threshold=0.75,
@@ -58,7 +33,7 @@ class DataPreprocessor:
         self.scale_features = scale_features
 
         # ==================================================
-        # LEARNED PARAMETERS
+        # GENERAL
         # ==================================================
 
         self.id_cols = []
@@ -73,39 +48,38 @@ class DataPreprocessor:
 
         self.categorical_features = []
 
-        self.label_mappings = {}
-
-        self.global_target_mean = None
-
         self.skewed_features = []
-
         self.skew_shifts = {}
 
         self.feature_columns = []
-
         self.scalable_features = []
-
-        self.feature_selector = None
-
-        self.selected_features = []
 
         self.scaler = None
 
         self.fitted = False
 
+        # ==================================================
+        # SUPERVISED
+        # ==================================================
+
+        self.label_mappings = {}
+        self.global_target_mean = None
+
+        self.feature_selector = None
+        self.selected_features = []
+
+        # ==================================================
+        # UNSUPERVISED
+        # ==================================================
+
+        self.one_hot_categories = {}
+        self.unsupervised_feature_columns = []
+
     # ======================================================
-    # CATEGORICAL DETECTION
+    # CATEGORICAL FEATURES
     # ======================================================
 
     def _get_categorical_features(self, X):
-        """
-        Universal categorical-column detection.
-
-        Handles:
-            - object
-            - string
-            - category
-        """
 
         return [
             col
@@ -123,23 +97,11 @@ class DataPreprocessor:
 
     def _detect_task(self, y):
 
-        """
-        Automatically determine regression vs classification.
-
-        Heuristic:
-            object/string -> classification
-            bool -> classification
-            numeric with <= 20 unique values -> classification
-            otherwise -> regression
-        """
-
         if (
             pd.api.types.is_object_dtype(y)
             or pd.api.types.is_string_dtype(y)
+            or pd.api.types.is_bool_dtype(y)
         ):
-            return "classification"
-
-        if pd.api.types.is_bool_dtype(y):
             return "classification"
 
         if pd.api.types.is_numeric_dtype(y):
@@ -157,10 +119,6 @@ class DataPreprocessor:
 
     def _detect_ids(self, X):
 
-        """
-        Detect columns where every value is unique.
-        """
-
         self.id_cols = []
 
         for col in X.columns:
@@ -172,25 +130,15 @@ class DataPreprocessor:
         return self.id_cols
 
     # ======================================================
-    # MISSING VALUE INDICATORS
+    # MISSING VALUE DETECTION
     # ======================================================
 
-    def _fit_missing_indicators(self, X):
+    def _detect_missing_features(self, X):
 
         self.features_with_nan = [
             col
             for col in X.columns
             if X[col].isnull().sum() > 0
-        ]
-
-        categorical_features = (
-            self._get_categorical_features(X)
-        )
-
-        self.features_nan_cat = [
-            col
-            for col in self.features_with_nan
-            if col in categorical_features
         ]
 
         self.features_nan_num = [
@@ -199,17 +147,28 @@ class DataPreprocessor:
             if pd.api.types.is_numeric_dtype(X[col])
         ]
 
+        self.features_nan_cat = [
+            col
+            for col in self.features_with_nan
+            if col not in self.features_nan_num
+        ]
+
+    # ======================================================
+    # MISSING INDICATORS
+    # ======================================================
+
     def _add_missing_indicators(self, X):
 
         X = X.copy()
 
         for feature in self.features_with_nan:
 
-            if feature in X.columns:
+            if feature not in X.columns:
+                continue
 
-                X[f"{feature}_nan"] = (
-                    X[feature].isnull().astype(int)
-                )
+            X[f"{feature}_nan"] = (
+                X[feature].isnull().astype(int)
+            )
 
         return X
 
@@ -223,42 +182,47 @@ class DataPreprocessor:
 
         for feature in self.features_nan_num:
 
-            self.train_medians[feature] = (
-                X[feature].median()
-            )
+            if feature not in X.columns:
+                continue
+
+            median_value = X[feature].median()
+
+            if pd.isna(median_value):
+                median_value = 0
+
+            self.train_medians[feature] = median_value
 
     def _apply_imputation(self, X):
 
         X = X.copy()
 
-        # ------------------------------------------
-        # Categorical
-        # ------------------------------------------
+        for feature in self.features_nan_num:
+
+            if feature not in X.columns:
+                continue
+
+            value = self.train_medians.get(
+                feature,
+                0
+            )
+
+            X[feature] = X[feature].fillna(value)
 
         for feature in self.features_nan_cat:
 
-            if feature in X.columns:
+            if feature not in X.columns:
+                continue
 
-                X[feature] = X[feature].fillna(
-                    "Missing"
-                )
-
-        # ------------------------------------------
-        # Numerical
-        # ------------------------------------------
-
-        for feature, median in self.train_medians.items():
-
-            if feature in X.columns:
-
-                X[feature] = X[feature].fillna(
-                    median
-                )
+            X[feature] = (
+                X[feature]
+                .fillna("Missing")
+                .astype(str)
+            )
 
         return X
 
     # ======================================================
-    # RARE LABEL GROUPING
+    # RARE CATEGORIES
     # ======================================================
 
     def _fit_rare_labels(self, X):
@@ -330,13 +294,10 @@ class DataPreprocessor:
                 minimum = series.min()
 
                 if minimum < 0:
-
                     self.skew_shifts[feature] = (
                         abs(minimum) + 1
                     )
-
                 else:
-
                     self.skew_shifts[feature] = 0
 
     def _apply_skewness(self, X):
@@ -368,14 +329,10 @@ class DataPreprocessor:
         return X
 
     # ======================================================
-    # TARGET ENCODING
+    # SUPERVISED TARGET ENCODING
     # ======================================================
 
     def _fit_target_encoding(self, X, y):
-
-        """
-        Learn target means from TRAINING DATA ONLY.
-        """
 
         categorical_features = (
             self._get_categorical_features(X)
@@ -407,10 +364,6 @@ class DataPreprocessor:
         X,
         y
     ):
-
-        """
-        Leave-one-out target encoding for training data.
-        """
 
         X = X.copy()
 
@@ -450,21 +403,16 @@ class DataPreprocessor:
                     if other_count > 0:
 
                         value = (
-                            other_sum /
-                            other_count
+                            other_sum / other_count
                         )
 
                     else:
 
-                        value = (
-                            self.global_target_mean
-                        )
+                        value = self.global_target_mean
 
                 else:
 
-                    value = (
-                        self.global_target_mean
-                    )
+                    value = self.global_target_mean
 
                 encoded_values.append(value)
 
@@ -473,12 +421,6 @@ class DataPreprocessor:
         return X
 
     def _apply_target_encoding(self, X):
-
-        """
-        Target encoding for test/new data.
-
-        Uses only mappings learned from training data.
-        """
 
         X = X.copy()
 
@@ -492,7 +434,6 @@ class DataPreprocessor:
             def encode_value(category):
 
                 if category not in mapping:
-
                     return self.global_target_mean
 
                 category_sum = mapping[
@@ -503,33 +444,80 @@ class DataPreprocessor:
                     category
                 ]["count"]
 
-                return (
-                    category_sum /
-                    category_count
-                )
+                return category_sum / category_count
 
             X[feature] = (
                 X[feature]
                 .map(encode_value)
-                .fillna(
-                    self.global_target_mean
-                )
+                .fillna(self.global_target_mean)
             )
 
         return X
 
     # ======================================================
-    # FINAL CATEGORICAL SAFETY
+    # UNSUPERVISED ONE-HOT ENCODING
+    # ======================================================
+
+    def _fit_one_hot_encoding(self, X):
+
+        self.one_hot_categories = {}
+
+        categorical_features = (
+            self._get_categorical_features(X)
+        )
+
+        for feature in categorical_features:
+
+            categories = (
+                X[feature]
+                .astype(str)
+                .unique()
+                .tolist()
+            )
+
+            self.one_hot_categories[feature] = categories
+
+    def _apply_one_hot_encoding(self, X):
+
+        X = X.copy()
+
+        for feature, categories in (
+            self.one_hot_categories.items()
+        ):
+
+            if feature not in X.columns:
+
+                for category in categories:
+
+                    X[
+                        f"{feature}_{category}"
+                    ] = 0
+
+                continue
+
+            values = X[feature].astype(str)
+
+            for category in categories:
+
+                X[
+                    f"{feature}_{category}"
+                ] = (
+                    values == str(category)
+                ).astype(int)
+
+            X = X.drop(
+                columns=[feature]
+            )
+
+        return X
+
+    # ======================================================
+    # NUMERIC VALIDATION
     # ======================================================
 
     def _ensure_numeric(self, X):
 
-        """
-        Final safety check.
-
-        No categorical/string column is allowed to reach
-        scaling or feature selection.
-        """
+        X = X.copy()
 
         categorical_features = (
             self._get_categorical_features(X)
@@ -538,12 +526,11 @@ class DataPreprocessor:
         if categorical_features:
 
             raise ValueError(
-                "Categorical features remain after "
-                "target encoding: "
+                "Categorical features remain "
+                "before scaling: "
                 f"{categorical_features}"
             )
 
-        # Convert boolean columns to integers
         boolean_features = [
             col
             for col in X.columns
@@ -552,11 +539,8 @@ class DataPreprocessor:
 
         for feature in boolean_features:
 
-            X[feature] = (
-                X[feature].astype(int)
-            )
+            X[feature] = X[feature].astype(int)
 
-        # Final numeric validation
         non_numeric_features = [
             col
             for col in X.columns
@@ -566,8 +550,8 @@ class DataPreprocessor:
         if non_numeric_features:
 
             raise ValueError(
-                "Non-numeric features remain before "
-                "scaling: "
+                "Non-numeric features remain "
+                "before scaling: "
                 f"{non_numeric_features}"
             )
 
@@ -584,12 +568,9 @@ class DataPreprocessor:
         for feature in self.feature_columns:
 
             if feature not in X.columns:
-
                 X[feature] = 0
 
-        X = X[
-            self.feature_columns
-        ]
+        X = X[self.feature_columns]
 
         return X
 
@@ -612,9 +593,11 @@ class DataPreprocessor:
 
         self.scaler = MinMaxScaler()
 
-        self.scaler.fit(
-            X[self.scalable_features]
-        )
+        if self.scalable_features:
+
+            self.scaler.fit(
+                X[self.scalable_features]
+            )
 
     def _apply_scaling(self, X):
 
@@ -629,23 +612,19 @@ class DataPreprocessor:
         if not self.scalable_features:
             return X
 
-        X[
-            self.scalable_features
-        ] = self.scaler.transform(
-            X[self.scalable_features]
+        X[self.scalable_features] = (
+            self.scaler.transform(
+                X[self.scalable_features]
+            )
         )
 
         return X
 
     # ======================================================
-    # FEATURE SELECTION
+    # SUPERVISED FEATURE SELECTION
     # ======================================================
 
-    def _fit_feature_selector(
-        self,
-        X,
-        y
-    ):
+    def _fit_feature_selector(self, X, y):
 
         if self.task == "regression":
 
@@ -669,11 +648,9 @@ class DataPreprocessor:
                 f"Unsupported task: {self.task}"
             )
 
-        self.feature_selector = (
-            SelectFromModel(
-                estimator=estimator,
-                threshold="mean"
-            )
+        self.feature_selector = SelectFromModel(
+            estimator=estimator,
+            threshold="mean"
         )
 
         self.feature_selector.fit(
@@ -696,7 +673,7 @@ class DataPreprocessor:
             if selected
         ]
 
-        if len(self.selected_features) == 0:
+        if not self.selected_features:
 
             raise ValueError(
                 "Feature selection removed all "
@@ -711,15 +688,12 @@ class DataPreprocessor:
         for feature in self.selected_features:
 
             if feature not in X.columns:
-
                 X[feature] = 0
 
-        return X[
-            self.selected_features
-        ]
+        return X[self.selected_features]
 
     # ======================================================
-    # FIT
+    # SUPERVISED FIT
     # ======================================================
 
     def fit(
@@ -728,121 +702,68 @@ class DataPreprocessor:
         y_train
     ):
 
-        """
-        FIT ONLY on training data.
-        """
+        if y_train is None:
+
+            raise ValueError(
+                "Target values are required "
+                "for supervised preprocessing."
+            )
 
         X_train = X_train.copy()
 
-        y_train = pd.Series(
-            y_train,
-            index=X_train.index
-        )
-
-        if len(X_train) != len(y_train):
-
-            raise ValueError(
-                "X_train and y_train must have "
-                "the same number of rows."
-            )
-
-        # ------------------------------------------
-        # Task
-        # ------------------------------------------
-
-        if self.task is None:
-
-            self.task = self._detect_task(
-                y_train
-            )
-
-        # ------------------------------------------
-        # IDs
-        # ------------------------------------------
-
-        self._detect_ids(
-            X_train
-        )
+        self._detect_ids(X_train)
 
         X = X_train.drop(
             columns=self.id_cols,
             errors="ignore"
         )
 
-        # ------------------------------------------
-        # Missing indicators
-        # ------------------------------------------
-
-        self._fit_missing_indicators(X)
-
-        X = self._add_missing_indicators(X)
-
-        # ------------------------------------------
-        # Imputation
-        # ------------------------------------------
+        self._detect_missing_features(X)
 
         self._fit_imputation(X)
 
-        X = self._apply_imputation(X)
-
-        # ------------------------------------------
-        # Rare labels
-        # ------------------------------------------
-
         self._fit_rare_labels(X)
 
-        X = self._apply_rare_labels(X)
+        X_temp = self._apply_imputation(X)
 
-        # ------------------------------------------
-        # Skew
-        # ------------------------------------------
+        X_temp = self._apply_rare_labels(
+            X_temp
+        )
 
-        self._fit_skewness(X)
+        self._fit_skewness(X_temp)
 
-        X = self._apply_skewness(X)
-
-        # ------------------------------------------
-        # Target encoding
-        # ------------------------------------------
+        X_temp = self._apply_skewness(
+            X_temp
+        )
 
         self._fit_target_encoding(
-            X,
+            X_temp,
             y_train
         )
 
-        X = self._apply_target_encoding_train(
-            X,
-            y_train
+        X_temp = (
+            self._apply_target_encoding_train(
+                X_temp,
+                y_train
+            )
         )
 
-        # ------------------------------------------
-        # Final numeric conversion/check
-        # ------------------------------------------
-
-        X = self._ensure_numeric(X)
-
-        # ------------------------------------------
-        # Save feature structure
-        # ------------------------------------------
+        X_temp = self._ensure_numeric(
+            X_temp
+        )
 
         self.feature_columns = (
-            X.columns.tolist()
+            X_temp.columns.tolist()
         )
 
-        # ------------------------------------------
-        # Scaling
-        # ------------------------------------------
+        self._fit_scaler(X_temp)
 
-        self._fit_scaler(X)
-
-        X = self._apply_scaling(X)
-
-        # ------------------------------------------
-        # Feature selection
-        # ------------------------------------------
+        X_temp = self._apply_scaling(
+            X_temp
+        )
 
         self._fit_feature_selector(
-            X,
+            X_temp,
             y_train
         )
 
@@ -851,26 +772,18 @@ class DataPreprocessor:
         return self
 
     # ======================================================
-    # TRANSFORM
+    # SUPERVISED TRANSFORM
     # ======================================================
 
-    def transform(
-        self,
-        X
-    ):
+    def transform(self, X):
 
         if not self.fitted:
 
             raise RuntimeError(
-                "Pipeline has not been fitted. "
-                "Call fit(X_train, y_train) first."
+                "Pipeline has not been fitted yet."
             )
 
         X = X.copy()
-
-        # ------------------------------------------
-        # Save IDs
-        # ------------------------------------------
 
         ids = pd.DataFrame(
             index=X.index
@@ -879,76 +792,35 @@ class DataPreprocessor:
         for col in self.id_cols:
 
             if col in X.columns:
-
                 ids[col] = X[col]
-
-        # ------------------------------------------
-        # Remove IDs
-        # ------------------------------------------
 
         X = X.drop(
             columns=self.id_cols,
             errors="ignore"
         )
 
-        # ------------------------------------------
-        # Missing indicators
-        # ------------------------------------------
-
         X = self._add_missing_indicators(X)
-
-        # ------------------------------------------
-        # Imputation
-        # ------------------------------------------
 
         X = self._apply_imputation(X)
 
-        # ------------------------------------------
-        # Rare labels
-        # ------------------------------------------
-
         X = self._apply_rare_labels(X)
-
-        # ------------------------------------------
-        # Skew
-        # ------------------------------------------
 
         X = self._apply_skewness(X)
 
-        # ------------------------------------------
-        # Target encoding
-        # ------------------------------------------
-
         X = self._apply_target_encoding(X)
-
-        # ------------------------------------------
-        # Align
-        # ------------------------------------------
 
         X = self._align_features(X)
 
-        # ------------------------------------------
-        # Numeric safety
-        # ------------------------------------------
-
         X = self._ensure_numeric(X)
 
-        # ------------------------------------------
-        # Scaling
-        # ------------------------------------------
-
         X = self._apply_scaling(X)
-
-        # ------------------------------------------
-        # Feature selection
-        # ------------------------------------------
 
         X = self._apply_feature_selection(X)
 
         return X, ids
 
     # ======================================================
-    # FIT TRANSFORM
+    # SUPERVISED FIT TRANSFORM
     # ======================================================
 
     def fit_transform(
@@ -957,13 +829,6 @@ class DataPreprocessor:
         y_train
     ):
 
-        """
-        Fit pipeline on training data and return
-        processed training data.
-
-        Uses leave-one-out target encoding.
-        """
-
         self.fit(
             X_train,
             y_train
@@ -971,76 +836,225 @@ class DataPreprocessor:
 
         X = X_train.copy()
 
-        # ------------------------------------------
-        # Remove IDs
-        # ------------------------------------------
-
         X = X.drop(
             columns=self.id_cols,
             errors="ignore"
         )
 
-        # ------------------------------------------
-        # Missing indicators
-        # ------------------------------------------
-
         X = self._add_missing_indicators(X)
-
-        # ------------------------------------------
-        # Imputation
-        # ------------------------------------------
 
         X = self._apply_imputation(X)
 
-        # ------------------------------------------
-        # Rare labels
-        # ------------------------------------------
-
         X = self._apply_rare_labels(X)
 
-        # ------------------------------------------
-        # Skew
-        # ------------------------------------------
-
         X = self._apply_skewness(X)
-
-        # ------------------------------------------
-        # Target encoding
-        # ------------------------------------------
 
         X = self._apply_target_encoding_train(
             X,
             y_train
         )
 
-        # ------------------------------------------
-        # Align
-        # ------------------------------------------
-
         X = self._align_features(X)
-
-        # ------------------------------------------
-        # Numeric safety
-        # ------------------------------------------
 
         X = self._ensure_numeric(X)
 
-        # ------------------------------------------
-        # Scaling
-        # ------------------------------------------
-
         X = self._apply_scaling(X)
-
-        # ------------------------------------------
-        # Feature selection
-        # ------------------------------------------
 
         X = self._apply_feature_selection(X)
 
         return X
 
     # ======================================================
-    # INFORMATION
+    # UNSUPERVISED FIT
+    # ======================================================
+
+    def fit_unsupervised(self, X):
+
+        X = X.copy()
+
+        # ----------------------------------------------
+        # ID detection
+        # ----------------------------------------------
+
+        self._detect_ids(X)
+
+        X = X.drop(
+            columns=self.id_cols,
+            errors="ignore"
+        )
+
+        # ----------------------------------------------
+        # Missing values
+        # ----------------------------------------------
+
+        self._detect_missing_features(X)
+
+        self._fit_imputation(X)
+
+        X = self._apply_imputation(X)
+
+        # ----------------------------------------------
+        # Rare categories
+        # ----------------------------------------------
+
+        self._fit_rare_labels(X)
+
+        X = self._apply_rare_labels(X)
+
+        # ----------------------------------------------
+        # Skewness
+        # ----------------------------------------------
+
+        self._fit_skewness(X)
+
+        X = self._apply_skewness(X)
+
+        # ----------------------------------------------
+        # One-hot encoding
+        # ----------------------------------------------
+
+        self._fit_one_hot_encoding(X)
+
+        X = self._apply_one_hot_encoding(X)
+
+        # ----------------------------------------------
+        # Numeric validation
+        # ----------------------------------------------
+
+        X = self._ensure_numeric(X)
+
+        # ----------------------------------------------
+        # Save feature structure
+        # ----------------------------------------------
+
+        self.feature_columns = (
+            X.columns.tolist()
+        )
+
+        self.unsupervised_feature_columns = (
+            X.columns.tolist()
+        )
+
+        # ----------------------------------------------
+        # Scaling
+        # ----------------------------------------------
+
+        self._fit_scaler(X)
+
+        self.task = "unsupervised"
+
+        # No target-based feature selection.
+        self.selected_features = (
+            self.feature_columns.copy()
+        )
+
+        self.fitted = True
+
+        return self
+
+    # ======================================================
+    # UNSUPERVISED TRANSFORM
+    # ======================================================
+
+    def transform_unsupervised(self, X):
+
+        if not self.fitted:
+
+            raise RuntimeError(
+                "Unsupervised pipeline has "
+                "not been fitted yet."
+            )
+
+        X = X.copy()
+
+        ids = pd.DataFrame(
+            index=X.index
+        )
+
+        # ----------------------------------------------
+        # Preserve IDs
+        # ----------------------------------------------
+
+        for col in self.id_cols:
+
+            if col in X.columns:
+                ids[col] = X[col]
+
+        # ----------------------------------------------
+        # Remove IDs
+        # ----------------------------------------------
+
+        X = X.drop(
+            columns=self.id_cols,
+            errors="ignore"
+        )
+
+        # ----------------------------------------------
+        # Missing indicators
+        # ----------------------------------------------
+
+        X = self._add_missing_indicators(X)
+
+        # ----------------------------------------------
+        # Imputation
+        # ----------------------------------------------
+
+        X = self._apply_imputation(X)
+
+        # ----------------------------------------------
+        # Rare categories
+        # ----------------------------------------------
+
+        X = self._apply_rare_labels(X)
+
+        # ----------------------------------------------
+        # Skewness
+        # ----------------------------------------------
+
+        X = self._apply_skewness(X)
+
+        # ----------------------------------------------
+        # One-hot encoding
+        # ----------------------------------------------
+
+        X = self._apply_one_hot_encoding(X)
+
+        # ----------------------------------------------
+        # Align columns
+        # ----------------------------------------------
+
+        X = self._align_features(X)
+
+        # ----------------------------------------------
+        # Numeric validation
+        # ----------------------------------------------
+
+        X = self._ensure_numeric(X)
+
+        # ----------------------------------------------
+        # Scaling
+        # ----------------------------------------------
+
+        X = self._apply_scaling(X)
+
+        return X, ids
+
+    # ======================================================
+    # UNSUPERVISED FIT TRANSFORM
+    # ======================================================
+
+    def fit_transform_unsupervised(self, X):
+
+        self.fit_unsupervised(X)
+
+        X_processed, _ = (
+            self.transform_unsupervised(X)
+        )
+
+        return X_processed
+
+    # ======================================================
+    # PIPELINE INFORMATION
     # ======================================================
 
     def get_info(self):
@@ -1057,7 +1071,11 @@ class DataPreprocessor:
                 self.task,
 
             "target":
-                self.target_col,
+                (
+                    self.target_col
+                    if self.target_col is not None
+                    else "None"
+                ),
 
             "id_columns":
                 self.id_cols,
@@ -1084,214 +1102,15 @@ class DataPreprocessor:
                 len(self.selected_features),
 
             "selected_features":
-                self.selected_features
+                self.selected_features,
+
+            "feature_selection_method":
+                (
+                    "L1-based feature selection"
+                    if self.task in [
+                        "classification",
+                        "regression"
+                    ]
+                    else "Not applicable"
+                )
         }
-
-
-# ==========================================================
-# LOCAL TEST
-# ==========================================================
-
-if __name__ == "__main__":
-
-    from sklearn.model_selection import train_test_split
-
-    INPUT_FILE = "train.csv"
-
-    TARGET_COL = "SalePrice"
-
-    print("=" * 60)
-    print("LOADING DATA")
-    print("=" * 60)
-
-    df = pd.read_csv(
-        INPUT_FILE
-    )
-
-    print(
-        f"Dataset shape: {df.shape}"
-    )
-
-    X = df.drop(
-        columns=[TARGET_COL]
-    )
-
-    y = df[TARGET_COL]
-
-    processor = DataPreprocessor(
-        target_col=TARGET_COL
-    )
-
-    task = processor._detect_task(y)
-
-    print(
-        f"Detected task: {task}"
-    )
-
-    if task == "classification":
-
-        X_train, X_test, y_train, y_test = (
-            train_test_split(
-                X,
-                y,
-                test_size=0.2,
-                random_state=42,
-                stratify=y
-            )
-        )
-
-    else:
-
-        X_train, X_test, y_train, y_test = (
-            train_test_split(
-                X,
-                y,
-                test_size=0.2,
-                random_state=42
-            )
-        )
-
-    print(
-        f"X_train: {X_train.shape}"
-    )
-
-    print(
-        f"X_test : {X_test.shape}"
-    )
-
-    # ------------------------------------------------------
-    # FIT + TRANSFORM TRAIN
-    # ------------------------------------------------------
-
-    print("\n" + "=" * 60)
-    print("FITTING PIPELINE ON TRAINING DATA")
-    print("=" * 60)
-
-    X_train_processed = (
-        processor.fit_transform(
-            X_train,
-            y_train
-        )
-    )
-
-    # ------------------------------------------------------
-    # TRANSFORM TEST
-    # ------------------------------------------------------
-
-    print("\n" + "=" * 60)
-    print("TRANSFORMING TEST DATA")
-    print("=" * 60)
-
-    X_test_processed, test_ids = (
-        processor.transform(
-            X_test
-        )
-    )
-
-    # ------------------------------------------------------
-    # ADD TARGET
-    # ------------------------------------------------------
-
-    train_output = (
-        X_train_processed.copy()
-    )
-
-    train_output[TARGET_COL] = (
-        y_train.values
-    )
-
-    # ------------------------------------------------------
-    # ADD IDS
-    # ------------------------------------------------------
-
-    train_ids = pd.DataFrame(
-        index=X_train.index
-    )
-
-    for col in processor.id_cols:
-
-        if col in X_train.columns:
-
-            train_ids[col] = X_train[col]
-
-    if not train_ids.empty:
-
-        train_output = pd.concat(
-            [
-                train_ids.reset_index(drop=True),
-                train_output.reset_index(drop=True)
-            ],
-            axis=1
-        )
-
-    test_output = X_test_processed.copy()
-
-    if not test_ids.empty:
-
-        test_output = pd.concat(
-            [
-                test_ids.reset_index(drop=True),
-                test_output.reset_index(drop=True)
-            ],
-            axis=1
-        )
-
-    # ------------------------------------------------------
-    # SAVE
-    # ------------------------------------------------------
-
-    train_output.to_csv(
-        "X_train.csv",
-        index=False
-    )
-
-    test_output.to_csv(
-        "X_test.csv",
-        index=False
-    )
-
-    # ------------------------------------------------------
-    # INFO
-    # ------------------------------------------------------
-
-    print("\n" + "=" * 60)
-    print("PROCESSING COMPLETE")
-    print("=" * 60)
-
-    info = processor.get_info()
-
-    print(
-        f"Task: {info['task']}"
-    )
-
-    print(
-        f"Detected IDs: {info['id_columns']}"
-    )
-
-    print(
-        f"Original features: "
-        f"{info['original_feature_count']}"
-    )
-
-    print(
-        f"Selected features: "
-        f"{info['selected_feature_count']}"
-    )
-
-    print(
-        f"Skewed features: "
-        f"{len(info['skewed_features'])}"
-    )
-
-    print("\nSelected features:")
-
-    for feature in info["selected_features"]:
-
-        print(
-            f"  - {feature}"
-        )
-
-    print("\nFiles created:")
-
-    print("X_train.csv")
-    print("X_test.csv")
