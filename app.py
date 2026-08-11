@@ -13,6 +13,10 @@ API_URL = (
     "https://automated-ml-preprocessing-api.onrender.com/process"
 )
 
+EDA_API_URL = (
+    "https://automated-ml-preprocessing-api.onrender.com/eda"
+)
+
 
 # ==========================================================
 # PAGE CONFIGURATION
@@ -29,36 +33,28 @@ st.set_page_config(
 # SESSION STATE
 # ==========================================================
 
-if "processed" not in st.session_state:
-    st.session_state.processed = False
+defaults = {
+    "processed": False,
+    "zip_bytes": None,
+    "x_train_bytes": None,
+    "x_test_bytes": None,
+    "pipeline_info_bytes": None,
+    "eda_report_bytes": None,
+    "eda_generated": False,
+    "processed_target": None,
+    "processed_dataset_type": None,
+    "previous_dataset_type": None,
+}
 
-if "zip_bytes" not in st.session_state:
-    st.session_state.zip_bytes = None
+for key, value in defaults.items():
 
-if "x_train_bytes" not in st.session_state:
-    st.session_state.x_train_bytes = None
+    if key not in st.session_state:
 
-if "x_test_bytes" not in st.session_state:
-    st.session_state.x_test_bytes = None
-
-if "pipeline_info_bytes" not in st.session_state:
-    st.session_state.pipeline_info_bytes = None
-
-if "eda_report_bytes" not in st.session_state:
-    st.session_state.eda_report_bytes = None
-
-if "processed_target" not in st.session_state:
-    st.session_state.processed_target = None
-
-if "processed_dataset_type" not in st.session_state:
-    st.session_state.processed_dataset_type = None
-
-if "previous_dataset_type" not in st.session_state:
-    st.session_state.previous_dataset_type = None
+        st.session_state[key] = value
 
 
 # ==========================================================
-# HELPER - CLEAR PREVIOUS RESULTS
+# CLEAR RESULTS
 # ==========================================================
 
 def clear_results():
@@ -75,13 +71,15 @@ def clear_results():
 
     st.session_state.eda_report_bytes = None
 
+    st.session_state.eda_generated = False
+
     st.session_state.processed_target = None
 
     st.session_state.processed_dataset_type = None
 
 
 # ==========================================================
-# HELPER - FEATURE ANALYSIS
+# FEATURE ANALYSIS
 # ==========================================================
 
 def render_feature_analysis(df, feature):
@@ -93,7 +91,7 @@ def render_feature_analysis(df, feature):
     data = df[feature]
 
     # ------------------------------------------------------
-    # Numerical Feature
+    # Numerical
     # ------------------------------------------------------
 
     if pd.api.types.is_numeric_dtype(data):
@@ -123,9 +121,19 @@ def render_feature_analysis(df, feature):
 
         with col4:
 
+            mean_value = data.mean()
+
+            if pd.isna(mean_value):
+
+                mean_text = "N/A"
+
+            else:
+
+                mean_text = f"{mean_value:.3f}"
+
             st.metric(
                 "Mean",
-                f"{data.mean():.3f}"
+                mean_text
             )
 
         stats_col1, stats_col2 = st.columns(2)
@@ -134,11 +142,21 @@ def render_feature_analysis(df, feature):
 
             st.write("**Distribution**")
 
-            st.bar_chart(
-                data.dropna()
-                .value_counts()
-                .sort_index()
-            )
+            clean_data = data.dropna()
+
+            if not clean_data.empty:
+
+                st.bar_chart(
+                    clean_data
+                    .value_counts()
+                    .sort_index()
+                )
+
+            else:
+
+                st.info(
+                    "No numerical values available."
+                )
 
         with stats_col2:
 
@@ -170,7 +188,7 @@ def render_feature_analysis(df, feature):
             )
 
     # ------------------------------------------------------
-    # Categorical Feature
+    # Categorical
     # ------------------------------------------------------
 
     else:
@@ -201,19 +219,28 @@ def render_feature_analysis(df, feature):
         st.write("**Top Categories**")
 
         value_counts = (
-            data.fillna("Missing")
+            data
+            .fillna("Missing")
             .astype(str)
             .value_counts()
             .head(10)
         )
 
-        st.bar_chart(
-            value_counts
-        )
+        if not value_counts.empty:
+
+            st.bar_chart(
+                value_counts
+            )
+
+        else:
+
+            st.info(
+                "No categorical values available."
+            )
 
 
 # ==========================================================
-# HELPER - SELECT FIVE FEATURES
+# SELECT FIVE FEATURES
 # ==========================================================
 
 def select_eda_features(
@@ -231,10 +258,6 @@ def select_eda_features(
 
         return []
 
-    # ------------------------------------------------------
-    # Calculate feature scores
-    # ------------------------------------------------------
-
     scored_features = []
 
     for feature in available_features:
@@ -244,9 +267,6 @@ def select_eda_features(
         missing_ratio = (
             series.isnull().mean()
         )
-
-        # Numerical features get preference if they have
-        # meaningful variation.
 
         if pd.api.types.is_numeric_dtype(series):
 
@@ -294,10 +314,6 @@ def select_eda_features(
             )
         )
 
-    # ------------------------------------------------------
-    # Sort by score
-    # ------------------------------------------------------
-
     scored_features.sort(
         key=lambda x: x[1],
         reverse=True
@@ -308,10 +324,6 @@ def select_eda_features(
         for feature, score
         in scored_features[:5]
     ]
-
-    # ------------------------------------------------------
-    # If fewer than 5 features exist
-    # ------------------------------------------------------
 
     if len(selected) < 5:
 
@@ -331,10 +343,97 @@ def select_eda_features(
 
 
 # ==========================================================
+# GENERATE FULL EDA
+# ==========================================================
+
+def generate_full_eda(
+    file,
+    target
+):
+
+    try:
+
+        file.seek(0)
+
+        response = requests.post(
+            EDA_API_URL,
+            files={
+                "file": (
+                    file.name,
+                    file,
+                    "text/csv"
+                )
+            },
+            data={
+                "target": target
+            },
+            timeout=300
+        )
+
+        if response.status_code != 200:
+
+            try:
+
+                error_detail = (
+                    response.json()
+                    .get(
+                        "detail",
+                        "Unknown EDA error"
+                    )
+                )
+
+            except Exception:
+
+                error_detail = response.text
+
+            st.error(
+                f"EDA generation failed: "
+                f"{error_detail}"
+            )
+
+            return False
+
+        st.session_state.eda_report_bytes = (
+            response.content
+        )
+
+        st.session_state.eda_generated = True
+
+        return True
+
+    except requests.exceptions.ConnectionError:
+
+        st.error(
+            "Could not connect to the EDA API."
+        )
+
+        return False
+
+    except requests.exceptions.Timeout:
+
+        st.error(
+            "EDA generation timed out. "
+            "The dataset may be too large."
+        )
+
+        return False
+
+    except Exception as e:
+
+        st.error(
+            f"Unexpected EDA error: {str(e)}"
+        )
+
+        return False
+
+
+# ==========================================================
 # TITLE
 # ==========================================================
 
-st.title("⚙️ Auto ML Preprocessor")
+st.title(
+    "⚙️ Auto ML Preprocessor"
+)
 
 st.write(
     "Upload your dataset and automatically perform "
@@ -347,7 +446,9 @@ st.write(
 # DATASET TYPE
 # ==========================================================
 
-st.subheader("📂 What are you uploading?")
+st.subheader(
+    "📂 What are you uploading?"
+)
 
 dataset_type = st.radio(
     "Select dataset type:",
@@ -360,24 +461,27 @@ dataset_type = st.radio(
 )
 
 
-# ----------------------------------------------------------
-# Clear previous results if dataset type changes
-# ----------------------------------------------------------
+# ==========================================================
+# DATASET TYPE CHANGE
+# ==========================================================
 
 if (
     st.session_state.previous_dataset_type is not None
     and
-    st.session_state.previous_dataset_type != dataset_type
+    st.session_state.previous_dataset_type
+    != dataset_type
 ):
 
     clear_results()
 
 
-st.session_state.previous_dataset_type = dataset_type
+st.session_state.previous_dataset_type = (
+    dataset_type
+)
 
 
 # ==========================================================
-# DATASET TYPE INFORMATION
+# INFORMATION
 # ==========================================================
 
 if dataset_type == "Entire Dataset":
@@ -386,8 +490,8 @@ if dataset_type == "Entire Dataset":
         "Your complete dataset will be automatically "
         "split into training and testing sets. "
         "The preprocessing pipeline will be fitted only "
-        "on the training portion and then applied to the "
-        "test portion."
+        "on the training portion and then applied to "
+        "the test portion."
     )
 
 elif dataset_type == "Training Dataset":
@@ -455,7 +559,7 @@ else:
 
 
 # ==========================================================
-# ENTIRE / TRAINING DATASET
+# SINGLE DATASET WORKFLOW
 # ==========================================================
 
 if (
@@ -465,10 +569,6 @@ if (
     ]
     and uploaded_file is not None
 ):
-
-    # ------------------------------------------------------
-    # Read CSV
-    # ------------------------------------------------------
 
     try:
 
@@ -487,7 +587,7 @@ if (
         st.stop()
 
     # ------------------------------------------------------
-    # Dataset information
+    # Dataset loaded
     # ------------------------------------------------------
 
     st.success(
@@ -496,10 +596,12 @@ if (
     )
 
     # ------------------------------------------------------
-    # Original preview
+    # Preview
     # ------------------------------------------------------
 
-    st.subheader("👀 Dataset Preview")
+    st.subheader(
+        "👀 Dataset Preview"
+    )
 
     st.dataframe(
         df.head(20),
@@ -551,7 +653,9 @@ if (
     # Target
     # ------------------------------------------------------
 
-    st.subheader("🎯 Target Selection")
+    st.subheader(
+        "🎯 Target Selection"
+    )
 
     target_column = st.selectbox(
         "Select Target Column",
@@ -565,16 +669,18 @@ if (
     )
 
     # ======================================================
-    # EDA
+    # QUICK EDA
     # ======================================================
 
     st.divider()
 
-    st.subheader("📊 Exploratory Data Analysis")
+    st.subheader(
+        "📊 Quick Exploratory Data Analysis"
+    )
 
     st.write(
-        "The following five features have been selected "
-        "automatically for a quick analysis."
+        "Five features are automatically selected "
+        "for a quick analysis."
     )
 
     eda_features = select_eda_features(
@@ -596,15 +702,57 @@ if (
                     feature
                 )
 
-    else:
+    # ======================================================
+    # FULL SWEETVIZ EDA
+    # ======================================================
 
-        st.info(
-            "No features are available for analysis."
+    st.divider()
+
+    st.subheader(
+        "📊 Full Automated EDA"
+    )
+
+    st.write(
+        "Generate a complete interactive Sweetviz report "
+        "for a deeper analysis of your dataset."
+    )
+
+    if st.button(
+        "📊 Generate Full EDA Report",
+        use_container_width=True,
+        key="generate_full_eda_single"
+    ):
+
+        with st.spinner(
+            "Generating Sweetviz report... "
+            "This may take a little while."
+        ):
+
+            generate_full_eda(
+                uploaded_file,
+                target_column
+            )
+
+    if st.session_state.eda_generated:
+
+        st.success(
+            "✅ Full EDA report generated."
+        )
+
+        st.download_button(
+            label="📄 Download Full EDA Report (HTML)",
+            data=st.session_state.eda_report_bytes,
+            file_name="eda_report.html",
+            mime="text/html",
+            use_container_width=True,
+            key="download_eda_single"
         )
 
     # ======================================================
-    # PROCESS BUTTON
+    # PROCESS DATASET
     # ======================================================
+
+    st.divider()
 
     if st.button(
         "🚀 Process Dataset",
@@ -613,8 +761,7 @@ if (
     ):
 
         with st.spinner(
-            "Running EDA and preprocessing... "
-            "Please wait."
+            "Running preprocessing and feature selection..."
         ):
 
             try:
@@ -671,7 +818,7 @@ if (
                 )
 
                 # --------------------------------------------------
-                # Extract generated files
+                # Extract results
                 # --------------------------------------------------
 
                 with zipfile.ZipFile(
@@ -719,18 +866,6 @@ if (
 
                         st.session_state.pipeline_info_bytes = None
 
-                    if "eda_report.html" in files_in_zip:
-
-                        st.session_state.eda_report_bytes = (
-                            zip_file.read(
-                                "eda_report.html"
-                            )
-                        )
-
-                    else:
-
-                        st.session_state.eda_report_bytes = None
-
                 st.session_state.processed = True
 
                 st.session_state.processed_target = (
@@ -767,7 +902,7 @@ if (
 
 
 # ==========================================================
-# TEST DATASET PROCESSING
+# TEST DATASET WORKFLOW
 # ==========================================================
 
 if (
@@ -777,7 +912,7 @@ if (
 ):
 
     # ------------------------------------------------------
-    # Read training data
+    # Read train
     # ------------------------------------------------------
 
     try:
@@ -797,7 +932,7 @@ if (
         st.stop()
 
     # ------------------------------------------------------
-    # Read test data
+    # Read test
     # ------------------------------------------------------
 
     try:
@@ -833,7 +968,7 @@ if (
     )
 
     # ------------------------------------------------------
-    # Preview tabs
+    # Preview
     # ------------------------------------------------------
 
     train_preview_tab, test_preview_tab = st.tabs(
@@ -861,7 +996,9 @@ if (
     # Target
     # ------------------------------------------------------
 
-    st.subheader("🎯 Target Selection")
+    st.subheader(
+        "🎯 Target Selection"
+    )
 
     target_column = st.selectbox(
         "Select Target Column",
@@ -876,17 +1013,18 @@ if (
     )
 
     # ======================================================
-    # EDA
+    # QUICK EDA
     # ======================================================
 
     st.divider()
 
-    st.subheader("📊 Exploratory Data Analysis")
+    st.subheader(
+        "📊 Quick Exploratory Data Analysis"
+    )
 
     st.write(
         "EDA is performed on the training dataset because "
-        "it contains the target and is used to learn the "
-        "preprocessing pipeline."
+        "it contains the target."
     )
 
     eda_features = select_eda_features(
@@ -894,23 +1032,69 @@ if (
         target_column
     )
 
-    if eda_features:
+    for feature in eda_features:
 
-        for feature in eda_features:
+        with st.expander(
+            f"🔎 Analyze: {feature}",
+            expanded=False
+        ):
 
-            with st.expander(
-                f"🔎 Analyze: {feature}",
-                expanded=False
-            ):
-
-                render_feature_analysis(
-                    train_df,
-                    feature
-                )
+            render_feature_analysis(
+                train_df,
+                feature
+            )
 
     # ======================================================
-    # PROCESS BUTTON
+    # FULL SWEETVIZ EDA
     # ======================================================
+
+    st.divider()
+
+    st.subheader(
+        "📊 Full Automated EDA"
+    )
+
+    st.write(
+        "The full EDA report is generated from the "
+        "training dataset because the target belongs "
+        "to the training data."
+    )
+
+    if st.button(
+        "📊 Generate Full EDA Report",
+        use_container_width=True,
+        key="generate_full_eda_test"
+    ):
+
+        with st.spinner(
+            "Generating Sweetviz report..."
+        ):
+
+            generate_full_eda(
+                train_file,
+                target_column
+            )
+
+    if st.session_state.eda_generated:
+
+        st.success(
+            "✅ Full EDA report generated."
+        )
+
+        st.download_button(
+            label="📄 Download Full EDA Report (HTML)",
+            data=st.session_state.eda_report_bytes,
+            file_name="eda_report.html",
+            mime="text/html",
+            use_container_width=True,
+            key="download_eda_test"
+        )
+
+    # ======================================================
+    # PROCESS TEST
+    # ======================================================
+
+    st.divider()
 
     if st.button(
         "🚀 Process Test Dataset",
@@ -919,8 +1103,8 @@ if (
     ):
 
         with st.spinner(
-            "Running EDA and fitting preprocessing on "
-            "training data, then transforming test data..."
+            "Fitting preprocessing on training data "
+            "and transforming test data..."
         ):
 
             try:
@@ -972,19 +1156,11 @@ if (
 
                     st.stop()
 
-                # --------------------------------------------------
-                # Store ZIP
-                # --------------------------------------------------
-
                 zip_bytes = response.content
 
                 st.session_state.zip_bytes = (
                     zip_bytes
                 )
-
-                # --------------------------------------------------
-                # Extract files
-                # --------------------------------------------------
 
                 with zipfile.ZipFile(
                     io.BytesIO(zip_bytes),
@@ -1031,18 +1207,6 @@ if (
 
                         st.session_state.pipeline_info_bytes = None
 
-                    if "eda_report.html" in files_in_zip:
-
-                        st.session_state.eda_report_bytes = (
-                            zip_file.read(
-                                "eda_report.html"
-                            )
-                        )
-
-                    else:
-
-                        st.session_state.eda_report_bytes = None
-
                 st.session_state.processed = True
 
                 st.session_state.processed_target = (
@@ -1066,9 +1230,7 @@ if (
             except requests.exceptions.Timeout:
 
                 st.error(
-                    "The request timed out. "
-                    "The dataset may be too large or "
-                    "the backend may be waking up."
+                    "The request timed out."
                 )
 
             except Exception as e:
@@ -1079,42 +1241,24 @@ if (
 
 
 # ==========================================================
-# DOWNLOAD SECTION
+# DOWNLOAD RESULTS
 # ==========================================================
 
 if (
     st.session_state.processed
-    and st.session_state.zip_bytes is not None
+    and
+    st.session_state.zip_bytes is not None
 ):
 
     st.divider()
 
-    st.subheader("📥 Download Results")
-
-    st.write(
-        "Your processed files are ready. "
-        "You can download them individually or "
-        "download everything as a ZIP."
+    st.subheader(
+        "📥 Download Results"
     )
 
-    # ======================================================
-    # EDA REPORT
-    # ======================================================
-
-    if st.session_state.eda_report_bytes is not None:
-
-        st.download_button(
-            label="📊 Download Full EDA Report (HTML)",
-            data=st.session_state.eda_report_bytes,
-            file_name="eda_report.html",
-            mime="text/html",
-            use_container_width=True,
-            key="download_eda_report"
-        )
-
-    # ======================================================
-    # OTHER DOWNLOADS
-    # ======================================================
+    # ------------------------------------------------------
+    # Individual files
+    # ------------------------------------------------------
 
     download_items = []
 
@@ -1180,9 +1324,9 @@ if (
                     key=f"download_{filename}"
                 )
 
-    # ======================================================
-    # ZIP DOWNLOAD
-    # ======================================================
+    # ------------------------------------------------------
+    # ZIP
+    # ------------------------------------------------------
 
     st.download_button(
         label="📦 Download All Files (ZIP)",
@@ -1193,9 +1337,9 @@ if (
         key="download_all_files"
     )
 
-    # ======================================================
-    # PROCESSING INFORMATION
-    # ======================================================
+    # ------------------------------------------------------
+    # Information
+    # ------------------------------------------------------
 
     if st.session_state.processed_target:
 
@@ -1211,9 +1355,9 @@ if (
 
 if st.session_state.processed:
 
-    # ======================================================
-    # X TRAIN PREVIEW
-    # ======================================================
+    # ------------------------------------------------------
+    # TRAIN PREVIEW
+    # ------------------------------------------------------
 
     if st.session_state.x_train_bytes is not None:
 
@@ -1295,9 +1439,9 @@ if st.session_state.processed:
 
             pass
 
-    # ======================================================
-    # X TEST PREVIEW
-    # ======================================================
+    # ------------------------------------------------------
+    # TEST PREVIEW
+    # ------------------------------------------------------
 
     if st.session_state.x_test_bytes is not None:
 
