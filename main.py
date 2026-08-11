@@ -1409,7 +1409,7 @@ async def process_dataset(
 
         try:
 
-            processor.fit_transform(
+            X_train_processed = processor.fit_transform(
                 X_train,
                 y_train
             )
@@ -1422,6 +1422,41 @@ async def process_dataset(
                     "Pipeline fitting on training "
                     f"data failed: {str(e)}"
                 )
+            )
+
+        # --------------------------------------------------
+        # Build processed training output
+        # --------------------------------------------------
+
+        train_output = X_train_processed.copy()
+
+        # The target is retained in X_train because this is the
+        # labelled training dataset.
+        train_output[target] = y_train.values
+
+        train_ids = pd.DataFrame(
+            index=X_train.index
+        )
+
+        for col in processor.id_cols:
+
+            if col in X_train.columns:
+
+                train_ids[col] = X_train[col]
+
+        if not train_ids.empty:
+
+            train_output = pd.concat(
+                [
+                    train_ids.reset_index(
+                        drop=True
+                    ),
+
+                    train_output.reset_index(
+                        drop=True
+                    )
+                ],
+                axis=1
             )
 
         # --------------------------------------------------
@@ -1492,6 +1527,13 @@ async def process_dataset(
             "w",
             zipfile.ZIP_DEFLATED
         ) as zip_file:
+
+            zip_file.writestr(
+                "X_train.csv",
+                train_output.to_csv(
+                    index=False
+                )
+            )
 
             zip_file.writestr(
                 "X_test.csv",
