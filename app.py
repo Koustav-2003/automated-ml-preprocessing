@@ -7,7 +7,6 @@ import sweetviz as sv
 import tempfile
 import os
 import plotly.express as px
-import textwrap
 
 
 # ==========================================================
@@ -32,166 +31,205 @@ st.set_page_config(
 
 
 # ==========================================================
+# HTML RENDER HELPER
+# ==========================================================
+
+def render_html(html):
+    """
+    Render custom HTML using Streamlit's native HTML renderer
+    when available. Fall back to markdown for older versions.
+    """
+    if hasattr(st, "html"):
+        st.html(html)
+    else:
+        st.markdown(
+            html,
+            unsafe_allow_html=True
+        )
+
+
+# ==========================================================
 # CUSTOM UI / CSS
 # ==========================================================
 
-st.markdown(
-    textwrap.dedent(
-        """
-        <style>
+render_html(
+    """
+<style>
 
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 3rem;
-            max-width: 1400px;
-        }
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+    max-width: 1400px;
+}
 
-        h1, h2, h3 {
-            letter-spacing: -0.5px;
-        }
+h1, h2, h3 {
+    letter-spacing: -0.5px;
+}
 
-        /* HERO */
 
-        .hero {
-            padding: 2.2rem 2.5rem;
-            border-radius: 18px;
-            margin-bottom: 2rem;
-            border: 1px solid rgba(128,128,128,0.20);
-            background: linear-gradient(
-                135deg,
-                rgba(70,70,70,0.10),
-                rgba(100,100,100,0.04)
-            );
-        }
+/* =====================================================
+   HERO
+   ===================================================== */
 
-        .hero-title {
-            font-size: 2.65rem;
-            font-weight: 750;
-            margin-bottom: 0.35rem;
-            line-height: 1.15;
-        }
+.hero {
+    padding: 2.2rem 2.5rem;
+    border-radius: 18px;
+    margin-bottom: 2rem;
+    border: 1px solid rgba(128,128,128,0.20);
+    background: linear-gradient(
+        135deg,
+        rgba(70,70,70,0.10),
+        rgba(100,100,100,0.04)
+    );
+}
 
-        .hero-subtitle {
-            font-size: 1.18rem;
-            font-weight: 600;
-            margin-bottom: 0.65rem;
-        }
+.hero-title {
+    font-size: 2.65rem;
+    font-weight: 750;
+    margin-bottom: 0.35rem;
+    line-height: 1.15;
+}
 
-        .hero-description {
-            font-size: 1rem;
-            opacity: 0.78;
-            max-width: 850px;
-            line-height: 1.6;
-            margin-bottom: 1.2rem;
-        }
+.hero-subtitle {
+    font-size: 1.18rem;
+    font-weight: 600;
+    margin-bottom: 0.65rem;
+}
 
-        .workflow {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.55rem;
-            align-items: center;
-            font-size: 0.95rem;
-            font-weight: 600;
-        }
+.hero-description {
+    font-size: 1rem;
+    opacity: 0.78;
+    max-width: 850px;
+    line-height: 1.6;
+    margin-bottom: 1.2rem;
+}
 
-        .workflow-step {
-            padding: 0.45rem 0.8rem;
-            border-radius: 999px;
-            border: 1px solid rgba(128,128,128,0.25);
-            background: rgba(128,128,128,0.08);
-        }
+.workflow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    align-items: center;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
 
-        .workflow-arrow {
-            opacity: 0.5;
-        }
+.workflow-step {
+    padding: 0.45rem 0.8rem;
+    border-radius: 999px;
+    border: 1px solid rgba(128,128,128,0.25);
+    background: rgba(128,128,128,0.08);
+}
 
-        /* SECTION CARDS */
+.workflow-arrow {
+    opacity: 0.5;
+}
 
-        .section-card {
-            padding: 1.25rem 1.5rem;
-            border-radius: 14px;
-            border: 1px solid rgba(128,128,128,0.20);
-            margin-bottom: 1rem;
-        }
 
-        .section-card-title {
-            font-size: 1.15rem;
-            font-weight: 700;
-            margin-bottom: 0.3rem;
-        }
+/* =====================================================
+   SECTION CARDS
+   ===================================================== */
 
-        .section-card-description {
-            opacity: 0.7;
-            font-size: 0.92rem;
-        }
+.section-card {
+    padding: 1.25rem 1.5rem;
+    border-radius: 14px;
+    border: 1px solid rgba(128,128,128,0.20);
+    margin-bottom: 1rem;
+}
 
-        /* DOWNLOAD CARD */
+.section-card-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+}
 
-        .download-card {
-            padding: 1.2rem 1.4rem;
-            border-radius: 14px;
-            border: 1px solid rgba(128,128,128,0.20);
-            margin-bottom: 1rem;
-        }
+.section-card-description {
+    opacity: 0.7;
+    font-size: 0.92rem;
+}
 
-        .download-title {
-            font-size: 1.2rem;
-            font-weight: 700;
-            margin-bottom: 0.25rem;
-        }
 
-        .download-description {
-            opacity: 0.7;
-            font-size: 0.9rem;
-        }
+/* =====================================================
+   DOWNLOAD CARD
+   ===================================================== */
 
-        /* FOOTER */
+.download-card {
+    padding: 1.2rem 1.4rem;
+    border-radius: 14px;
+    border: 1px solid rgba(128,128,128,0.20);
+    margin-bottom: 1rem;
+}
 
-        .footer {
-            text-align: center;
-            opacity: 0.5;
-            font-size: 0.85rem;
-            padding-top: 2rem;
-        }
+.download-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
 
-        /* BUTTONS */
+.download-description {
+    opacity: 0.7;
+    font-size: 0.9rem;
+}
 
-        div.stButton > button {
-            border-radius: 10px;
-            font-weight: 650;
-            min-height: 2.7rem;
-        }
 
-        div.stDownloadButton > button {
-            border-radius: 10px;
-            font-weight: 600;
-            min-height: 2.6rem;
-        }
+/* =====================================================
+   FOOTER
+   ===================================================== */
 
-        /* FILE UPLOADER */
+.footer {
+    text-align: center;
+    opacity: 0.5;
+    font-size: 0.85rem;
+    padding-top: 2rem;
+}
 
-        [data-testid="stFileUploader"] {
-            border-radius: 14px;
-        }
 
-        /* METRICS */
+/* =====================================================
+   BUTTONS
+   ===================================================== */
 
-        [data-testid="stMetric"] {
-            padding: 0.8rem;
-            border-radius: 12px;
-            border: 1px solid rgba(128,128,128,0.15);
-        }
+div.stButton > button {
+    border-radius: 10px;
+    font-weight: 650;
+    min-height: 2.7rem;
+}
 
-        /* EXPANDERS */
+div.stDownloadButton > button {
+    border-radius: 10px;
+    font-weight: 600;
+    min-height: 2.6rem;
+}
 
-        [data-testid="stExpander"] {
-            border-radius: 10px;
-        }
 
-        </style>
-        """
-    ),
-    unsafe_allow_html=True
+/* =====================================================
+   FILE UPLOADER
+   ===================================================== */
+
+[data-testid="stFileUploader"] {
+    border-radius: 14px;
+}
+
+
+/* =====================================================
+   METRICS
+   ===================================================== */
+
+[data-testid="stMetric"] {
+    padding: 0.8rem;
+    border-radius: 12px;
+    border: 1px solid rgba(128,128,128,0.15);
+}
+
+
+/* =====================================================
+   EXPANDERS
+   ===================================================== */
+
+[data-testid="stExpander"] {
+    border-radius: 10px;
+}
+
+</style>
+"""
 )
 
 
@@ -220,7 +258,6 @@ defaults = {
 }
 
 for key, value in defaults.items():
-
     if key not in st.session_state:
         st.session_state[key] = value
 
@@ -249,70 +286,67 @@ def clear_results():
 # HERO
 # ==========================================================
 
-st.markdown(
-    textwrap.dedent(
-        """
-        <div class="hero">
+render_html(
+    """
+<div class="hero">
 
-            <div class="hero-title">
-                ⚙️ Auto ML Preprocessor
-            </div>
+    <div class="hero-title">
+        ⚙️ Auto ML Preprocessor
+    </div>
 
-            <div class="hero-subtitle">
-                No more manual EDA. No more repetitive preprocessing.
-            </div>
+    <div class="hero-subtitle">
+        No more manual EDA. No more repetitive preprocessing.
+    </div>
 
-            <div class="hero-description">
-                Upload your dataset and automatically perform
-                exploratory data analysis, preprocessing,
-                feature engineering, scaling and feature selection —
-                all in one workflow.
-            </div>
+    <div class="hero-description">
+        Upload your dataset and automatically perform
+        exploratory data analysis, preprocessing,
+        feature engineering, scaling and feature selection —
+        all in one workflow.
+    </div>
 
-            <div class="workflow">
+    <div class="workflow">
 
-                <div class="workflow-step">
-                    📁 Upload
-                </div>
-
-                <div class="workflow-arrow">
-                    →
-                </div>
-
-                <div class="workflow-step">
-                    📊 Analyze
-                </div>
-
-                <div class="workflow-arrow">
-                    →
-                </div>
-
-                <div class="workflow-step">
-                    ⚙️ Process
-                </div>
-
-                <div class="workflow-arrow">
-                    →
-                </div>
-
-                <div class="workflow-step">
-                    ✨ Engineer
-                </div>
-
-                <div class="workflow-arrow">
-                    →
-                </div>
-
-                <div class="workflow-step">
-                    📥 Download
-                </div>
-
-            </div>
-
+        <div class="workflow-step">
+            📁 Upload
         </div>
-        """
-    ),
-    unsafe_allow_html=True
+
+        <div class="workflow-arrow">
+            →
+        </div>
+
+        <div class="workflow-step">
+            📊 Analyze
+        </div>
+
+        <div class="workflow-arrow">
+            →
+        </div>
+
+        <div class="workflow-step">
+            ⚙️ Process
+        </div>
+
+        <div class="workflow-arrow">
+            →
+        </div>
+
+        <div class="workflow-step">
+            ✨ Engineer
+        </div>
+
+        <div class="workflow-arrow">
+            →
+        </div>
+
+        <div class="workflow-step">
+            📥 Download
+        </div>
+
+    </div>
+
+</div>
+"""
 )
 
 
@@ -324,18 +358,25 @@ def render_numerical_analysis(df, feature):
 
     data = df[feature]
 
-    missing_count = int(data.isnull().sum())
+    missing_count = int(
+        data.isnull().sum()
+    )
 
     missing_percentage = (
         data.isnull().mean() * 100
     )
 
-    unique_count = int(data.nunique())
+    unique_count = int(
+        data.nunique()
+    )
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric("Type", "Numerical")
+        st.metric(
+            "Type",
+            "Numerical"
+        )
 
     with col2:
         st.metric(
@@ -368,7 +409,9 @@ def render_numerical_analysis(df, feature):
 
     with col1:
 
-        st.write("**Summary Statistics**")
+        st.write(
+            "**Summary Statistics**"
+        )
 
         stats = pd.DataFrame({
             "Statistic": [
@@ -397,7 +440,9 @@ def render_numerical_analysis(df, feature):
 
     with col2:
 
-        st.write("**Distribution**")
+        st.write(
+            "**Distribution**"
+        )
 
         clean_data = data.dropna()
 
@@ -409,13 +454,19 @@ def render_numerical_analysis(df, feature):
                 .sort_index()
             )
 
-            st.bar_chart(distribution)
+            st.bar_chart(
+                distribution
+            )
 
         else:
 
-            st.info("No values available.")
+            st.info(
+                "No values available."
+            )
 
-    st.write("**Box Plot**")
+    st.write(
+        "**Box Plot**"
+    )
 
     clean_data = data.dropna()
 
@@ -468,18 +519,21 @@ def render_categorical_analysis(df, feature):
     col1, col2, col3 = st.columns(3)
 
     with col1:
+
         st.metric(
             "Type",
             "Categorical"
         )
 
     with col2:
+
         st.metric(
             "Missing",
             f"{missing_count} ({missing_percentage:.2f}%)"
         )
 
     with col3:
+
         st.metric(
             "Unique Values",
             unique_count
@@ -499,7 +553,9 @@ def render_categorical_analysis(df, feature):
 
     if not value_counts.empty:
 
-        st.bar_chart(value_counts)
+        st.bar_chart(
+            value_counts
+        )
 
         category_table = pd.DataFrame({
             "Category": value_counts.index,
@@ -580,14 +636,18 @@ def render_target_analysis(df, target):
 
         st.metric(
             "Missing",
-            int(target_data.isnull().sum())
+            int(
+                target_data.isnull().sum()
+            )
         )
 
     with col3:
 
         st.metric(
             "Unique Values",
-            int(target_data.nunique())
+            int(
+                target_data.nunique()
+            )
         )
 
     with col4:
@@ -708,7 +768,9 @@ def render_target_analysis(df, target):
             use_container_width=True
         )
 
-        st.bar_chart(class_counts)
+        st.bar_chart(
+            class_counts
+        )
 
 
 # ==========================================================
@@ -773,7 +835,9 @@ def generate_sweetviz_report(df, target):
         ):
 
             try:
-                os.remove(temp_path)
+                os.remove(
+                    temp_path
+                )
             except Exception:
                 pass
 
@@ -930,7 +994,9 @@ def render_sweetviz_section(
 
     if description:
 
-        st.write(description)
+        st.write(
+            description
+        )
 
     else:
 
@@ -985,24 +1051,21 @@ def render_sweetviz_section(
 # DATASET WORKFLOW CARD
 # ==========================================================
 
-st.markdown(
-    textwrap.dedent(
-        """
-        <div class="section-card">
+render_html(
+    """
+<div class="section-card">
 
-            <div class="section-card-title">
-                📂 Choose your dataset workflow
-            </div>
+    <div class="section-card-title">
+        📂 Choose your dataset workflow
+    </div>
 
-            <div class="section-card-description">
-                Tell the application how your data is currently
-                structured so it can apply the correct workflow.
-            </div>
+    <div class="section-card-description">
+        Tell the application how your data is currently
+        structured so it can apply the correct workflow.
+    </div>
 
-        </div>
-        """
-    ),
-    unsafe_allow_html=True
+</div>
+"""
 )
 
 
@@ -1033,7 +1096,9 @@ if (
 
     clear_results()
 
-st.session_state.previous_dataset_type = dataset_type
+st.session_state.previous_dataset_type = (
+    dataset_type
+)
 
 
 # ==========================================================
@@ -1181,30 +1246,35 @@ if (
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
+
         st.metric(
             "Rows",
             f"{df.shape[0]:,}"
         )
 
     with col2:
+
         st.metric(
             "Columns",
             f"{df.shape[1]:,}"
         )
 
     with col3:
+
         st.metric(
             "Numerical",
             len(numerical_features)
         )
 
     with col4:
+
         st.metric(
             "Categorical",
             len(categorical_features)
         )
 
     with col5:
+
         st.metric(
             "Missing Values",
             f"{int(df.isnull().sum().sum()):,}"
@@ -1320,19 +1390,27 @@ if (
 
                     st.stop()
 
-                st.session_state.zip_bytes = response.content
+                st.session_state.zip_bytes = (
+                    response.content
+                )
 
                 with zipfile.ZipFile(
-                    io.BytesIO(response.content),
+                    io.BytesIO(
+                        response.content
+                    ),
                     "r"
                 ) as zip_file:
 
-                    files_in_zip = zip_file.namelist()
+                    files_in_zip = (
+                        zip_file.namelist()
+                    )
 
                     if "X_train.csv" in files_in_zip:
 
                         st.session_state.x_train_bytes = (
-                            zip_file.read("X_train.csv")
+                            zip_file.read(
+                                "X_train.csv"
+                            )
                         )
 
                     else:
@@ -1342,7 +1420,9 @@ if (
                     if "X_test.csv" in files_in_zip:
 
                         st.session_state.x_test_bytes = (
-                            zip_file.read("X_test.csv")
+                            zip_file.read(
+                                "X_test.csv"
+                            )
                         )
 
                     else:
@@ -1610,19 +1690,27 @@ if (
 
                     st.stop()
 
-                st.session_state.zip_bytes = response.content
+                st.session_state.zip_bytes = (
+                    response.content
+                )
 
                 with zipfile.ZipFile(
-                    io.BytesIO(response.content),
+                    io.BytesIO(
+                        response.content
+                    ),
                     "r"
                 ) as zip_file:
 
-                    files_in_zip = zip_file.namelist()
+                    files_in_zip = (
+                        zip_file.namelist()
+                    )
 
                     if "X_train.csv" in files_in_zip:
 
                         st.session_state.x_train_bytes = (
-                            zip_file.read("X_train.csv")
+                            zip_file.read(
+                                "X_train.csv"
+                            )
                         )
 
                     else:
@@ -1632,7 +1720,9 @@ if (
                     if "X_test.csv" in files_in_zip:
 
                         st.session_state.x_test_bytes = (
-                            zip_file.read("X_test.csv")
+                            zip_file.read(
+                                "X_test.csv"
+                            )
                         )
 
                     else:
@@ -1700,24 +1790,21 @@ if (
 
     st.divider()
 
-    st.markdown(
-        textwrap.dedent(
-            """
-            <div class="download-card">
+    render_html(
+        """
+<div class="download-card">
 
-                <div class="download-title">
-                    📥 Your processed data is ready
-                </div>
+    <div class="download-title">
+        📥 Your processed data is ready
+    </div>
 
-                <div class="download-description">
-                    Download individual outputs below or grab
-                    everything together as a ZIP archive.
-                </div>
+    <div class="download-description">
+        Download individual outputs below or grab
+        everything together as a ZIP archive.
+    </div>
 
-            </div>
-            """
-        ),
-        unsafe_allow_html=True
+</div>
+"""
     )
 
     download_items = []
@@ -1918,14 +2005,11 @@ if st.session_state.processed:
 # FOOTER
 # ==========================================================
 
-st.markdown(
-    textwrap.dedent(
-        """
-        <div class="footer">
-            Auto ML Preprocessor · Automated EDA ·
-            Feature Engineering · Feature Selection
-        </div>
-        """
-    ),
-    unsafe_allow_html=True
+render_html(
+    """
+<div class="footer">
+    Auto ML Preprocessor · Automated EDA ·
+    Feature Engineering · Feature Selection
+</div>
+"""
 )
