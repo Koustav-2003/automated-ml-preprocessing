@@ -3,6 +3,9 @@ import pandas as pd
 import requests
 import io
 import zipfile
+import sweetviz as sv
+import tempfile
+import os
 
 
 # ==========================================================
@@ -11,10 +14,6 @@ import zipfile
 
 API_URL = (
     "https://automated-ml-preprocessing-api.onrender.com/process"
-)
-
-EDA_API_URL = (
-    "https://automated-ml-preprocessing-api.onrender.com/eda"
 )
 
 
@@ -79,10 +78,14 @@ def clear_results():
 
 
 # ==========================================================
-# FEATURE ANALYSIS
+# QUICK EDA - FEATURE ANALYSIS
 # ==========================================================
 
-def render_feature_analysis(df, feature):
+def render_feature_analysis(
+    df,
+    feature,
+    target=None
+):
 
     st.markdown(
         f"### 🔎 {feature}"
@@ -90,9 +93,21 @@ def render_feature_analysis(df, feature):
 
     data = df[feature]
 
-    # ------------------------------------------------------
-    # Numerical
-    # ------------------------------------------------------
+    missing_count = int(
+        data.isnull().sum()
+    )
+
+    missing_percentage = (
+        data.isnull().mean() * 100
+    )
+
+    unique_count = int(
+        data.nunique()
+    )
+
+    # ======================================================
+    # NUMERICAL FEATURE
+    # ======================================================
 
     if pd.api.types.is_numeric_dtype(data):
 
@@ -109,14 +124,15 @@ def render_feature_analysis(df, feature):
 
             st.metric(
                 "Missing",
-                int(data.isnull().sum())
+                f"{missing_count} "
+                f"({missing_percentage:.2f}%)"
             )
 
         with col3:
 
             st.metric(
                 "Unique Values",
-                int(data.nunique())
+                unique_count
             )
 
         with col4:
@@ -136,31 +152,17 @@ def render_feature_analysis(df, feature):
                 mean_text
             )
 
+        # --------------------------------------------------
+        # Statistics
+        # --------------------------------------------------
+
         stats_col1, stats_col2 = st.columns(2)
 
         with stats_col1:
 
-            st.write("**Distribution**")
-
-            clean_data = data.dropna()
-
-            if not clean_data.empty:
-
-                st.bar_chart(
-                    clean_data
-                    .value_counts()
-                    .sort_index()
-                )
-
-            else:
-
-                st.info(
-                    "No numerical values available."
-                )
-
-        with stats_col2:
-
-            st.write("**Summary Statistics**")
+            st.write(
+                "**Summary Statistics**"
+            )
 
             stats = pd.DataFrame({
                 "Statistic": [
@@ -187,9 +189,55 @@ def render_feature_analysis(df, feature):
                 use_container_width=True
             )
 
-    # ------------------------------------------------------
-    # Categorical
-    # ------------------------------------------------------
+        # --------------------------------------------------
+        # Distribution
+        # --------------------------------------------------
+
+        with stats_col2:
+
+            st.write(
+                "**Distribution**"
+            )
+
+            clean_data = data.dropna()
+
+            if not clean_data.empty:
+
+                st.bar_chart(
+                    clean_data
+                    .value_counts()
+                    .sort_index()
+                )
+
+            else:
+
+                st.info(
+                    "No values available."
+                )
+
+        # --------------------------------------------------
+        # Box Plot
+        # --------------------------------------------------
+
+        st.write(
+            "**Box Plot**"
+        )
+
+        clean_data = data.dropna()
+
+        if not clean_data.empty:
+
+            box_data = pd.DataFrame({
+                feature: clean_data
+            })
+
+            st.line_chart(
+                box_data
+            )
+
+    # ======================================================
+    # CATEGORICAL FEATURE
+    # ======================================================
 
     else:
 
@@ -206,30 +254,49 @@ def render_feature_analysis(df, feature):
 
             st.metric(
                 "Missing",
-                int(data.isnull().sum())
+                f"{missing_count} "
+                f"({missing_percentage:.2f}%)"
             )
 
         with col3:
 
             st.metric(
                 "Unique Values",
-                int(data.nunique())
+                unique_count
             )
 
-        st.write("**Top Categories**")
+        st.write(
+            "**Top Categories**"
+        )
 
         value_counts = (
             data
             .fillna("Missing")
             .astype(str)
             .value_counts()
-            .head(10)
+            .head(15)
         )
 
         if not value_counts.empty:
 
             st.bar_chart(
                 value_counts
+            )
+
+            category_table = pd.DataFrame({
+                "Category": value_counts.index,
+                "Count": value_counts.values,
+                "Percentage": (
+                    value_counts.values
+                    / len(data)
+                    * 100
+                ).round(2)
+            })
+
+            st.dataframe(
+                category_table,
+                hide_index=True,
+                use_container_width=True
             )
 
         else:
@@ -240,191 +307,290 @@ def render_feature_analysis(df, feature):
 
 
 # ==========================================================
-# SELECT FIVE FEATURES
+# TARGET ANALYSIS
 # ==========================================================
 
-def select_eda_features(
+def render_target_analysis(
     df,
-    target=None
+    target
 ):
 
-    available_features = [
-        column
-        for column in df.columns
-        if column != target
-    ]
+    st.subheader(
+        "🎯 Target Analysis"
+    )
 
-    if not available_features:
+    target_data = df[target]
 
-        return []
+    col1, col2, col3, col4 = st.columns(4)
 
-    scored_features = []
+    with col1:
 
-    for feature in available_features:
-
-        series = df[feature]
-
-        missing_ratio = (
-            series.isnull().mean()
+        st.metric(
+            "Target Type",
+            (
+                "Numerical"
+                if pd.api.types.is_numeric_dtype(
+                    target_data
+                )
+                else "Categorical"
+            )
         )
 
-        if pd.api.types.is_numeric_dtype(series):
+    with col2:
 
-            unique_count = series.nunique()
+        st.metric(
+            "Missing",
+            int(
+                target_data.isnull().sum()
+            )
+        )
 
-            if unique_count > 1:
+    with col3:
 
-                try:
+        st.metric(
+            "Unique Values",
+            int(
+                target_data.nunique()
+            )
+        )
 
-                    skewness = abs(
-                        series.skew()
-                    )
+    with col4:
 
-                    if pd.isna(skewness):
+        st.metric(
+            "Rows",
+            len(target_data)
+        )
 
-                        skewness = 0
+    # ======================================================
+    # NUMERICAL TARGET
+    # ======================================================
 
-                except Exception:
+    if pd.api.types.is_numeric_dtype(
+        target_data
+    ):
 
-                    skewness = 0
+        col1, col2 = st.columns(2)
 
-            else:
+        with col1:
 
-                skewness = 0
+            st.write(
+                "**Target Statistics**"
+            )
 
-            score = (
-                missing_ratio * 2
-                + min(skewness, 10) / 10
-                + 0.2
+            stats = pd.DataFrame({
+                "Statistic": [
+                    "Mean",
+                    "Median",
+                    "Std Dev",
+                    "Minimum",
+                    "Maximum",
+                    "Skewness"
+                ],
+                "Value": [
+                    target_data.mean(),
+                    target_data.median(),
+                    target_data.std(),
+                    target_data.min(),
+                    target_data.max(),
+                    target_data.skew()
+                ]
+            })
+
+            st.dataframe(
+                stats,
+                hide_index=True,
+                use_container_width=True
+            )
+
+        with col2:
+
+            st.write(
+                "**Target Distribution**"
+            )
+
+            clean_target = (
+                target_data.dropna()
+            )
+
+            if not clean_target.empty:
+
+                st.bar_chart(
+                    clean_target
+                    .value_counts()
+                    .sort_index()
+                )
+
+    # ======================================================
+    # CATEGORICAL TARGET
+    # ======================================================
+
+    else:
+
+        st.write(
+            "**Class Distribution**"
+        )
+
+        class_counts = (
+            target_data
+            .fillna("Missing")
+            .astype(str)
+            .value_counts()
+        )
+
+        class_table = pd.DataFrame({
+            "Class": class_counts.index,
+            "Count": class_counts.values,
+            "Percentage": (
+                class_counts.values
+                / len(target_data)
+                * 100
+            ).round(2)
+        })
+
+        st.dataframe(
+            class_table,
+            hide_index=True,
+            use_container_width=True
+        )
+
+        st.bar_chart(
+            class_counts
+        )
+
+
+# ==========================================================
+# FULL SWEETVIZ REPORT
+# ==========================================================
+
+def generate_sweetviz_report(
+    df,
+    target
+):
+
+    temp_path = None
+
+    try:
+
+        # --------------------------------------------------
+        # Limit only the EDA dataset
+        # --------------------------------------------------
+
+        MAX_EDA_ROWS = 5000
+
+        if len(df) > MAX_EDA_ROWS:
+
+            eda_df = df.sample(
+                n=MAX_EDA_ROWS,
+                random_state=42
             )
 
         else:
 
-            unique_count = series.nunique()
+            eda_df = df.copy()
 
-            score = (
-                missing_ratio * 2
-                + min(unique_count, 50) / 50
-            )
+        # --------------------------------------------------
+        # Temporary HTML
+        # --------------------------------------------------
 
-        scored_features.append(
-            (
-                feature,
-                score
-            )
+        temp_file = tempfile.NamedTemporaryFile(
+            suffix=".html",
+            delete=False
         )
 
-    scored_features.sort(
-        key=lambda x: x[1],
-        reverse=True
-    )
+        temp_path = temp_file.name
 
-    selected = [
-        feature
-        for feature, score
-        in scored_features[:5]
-    ]
+        temp_file.close()
 
-    if len(selected) < 5:
+        # --------------------------------------------------
+        # Sweetviz
+        # --------------------------------------------------
 
-        for feature in available_features:
+        report = sv.analyze(
+            eda_df,
+            target_feat=target,
+            pairwise_analysis="off"
+        )
 
-            if feature not in selected:
+        # --------------------------------------------------
+        # Save report
+        # --------------------------------------------------
 
-                selected.append(
-                    feature
+        report.show_html(
+            filepath=temp_path,
+            open_browser=False,
+            layout="widescreen"
+        )
+
+        # --------------------------------------------------
+        # Read report
+        # --------------------------------------------------
+
+        with open(
+            temp_path,
+            "rb"
+        ) as html_file:
+
+            report_bytes = html_file.read()
+
+        return report_bytes
+
+    finally:
+
+        if (
+            temp_path is not None
+            and
+            os.path.exists(temp_path)
+        ):
+
+            try:
+
+                os.remove(
+                    temp_path
                 )
 
-            if len(selected) == 5:
+            except Exception:
 
-                break
-
-    return selected[:5]
+                pass
 
 
 # ==========================================================
-# GENERATE FULL EDA
+# GENERATE EDA BUTTON
 # ==========================================================
 
-def generate_full_eda(
-    file,
+def run_sweetviz(
+    df,
     target
 ):
 
     try:
 
-        file.seek(0)
+        with st.spinner(
+            "Generating full Sweetviz report..."
+        ):
 
-        response = requests.post(
-            EDA_API_URL,
-            files={
-                "file": (
-                    file.name,
-                    file,
-                    "text/csv"
+            report_bytes = (
+                generate_sweetviz_report(
+                    df,
+                    target
                 )
-            },
-            data={
-                "target": target
-            },
-            timeout=300
-        )
-
-        if response.status_code != 200:
-
-            try:
-
-                error_detail = (
-                    response.json()
-                    .get(
-                        "detail",
-                        "Unknown EDA error"
-                    )
-                )
-
-            except Exception:
-
-                error_detail = response.text
-
-            st.error(
-                f"EDA generation failed: "
-                f"{error_detail}"
             )
 
-            return False
-
         st.session_state.eda_report_bytes = (
-            response.content
+            report_bytes
         )
 
         st.session_state.eda_generated = True
 
-        return True
-
-    except requests.exceptions.ConnectionError:
-
-        st.error(
-            "Could not connect to the EDA API."
+        st.success(
+            "✅ Full EDA report generated."
         )
-
-        return False
-
-    except requests.exceptions.Timeout:
-
-        st.error(
-            "EDA generation timed out. "
-            "The dataset may be too large."
-        )
-
-        return False
 
     except Exception as e:
 
         st.error(
-            f"Unexpected EDA error: {str(e)}"
+            f"Sweetviz report generation failed: "
+            f"{str(e)}"
         )
-
-        return False
 
 
 # ==========================================================
@@ -466,7 +632,8 @@ dataset_type = st.radio(
 # ==========================================================
 
 if (
-    st.session_state.previous_dataset_type is not None
+    st.session_state.previous_dataset_type
+    is not None
     and
     st.session_state.previous_dataset_type
     != dataset_type
@@ -481,7 +648,7 @@ st.session_state.previous_dataset_type = (
 
 
 # ==========================================================
-# INFORMATION
+# DATASET TYPE INFORMATION
 # ==========================================================
 
 if dataset_type == "Entire Dataset":
@@ -570,6 +737,10 @@ if (
     and uploaded_file is not None
 ):
 
+    # ------------------------------------------------------
+    # Read dataset
+    # ------------------------------------------------------
+
     try:
 
         uploaded_file.seek(0)
@@ -587,7 +758,7 @@ if (
         st.stop()
 
     # ------------------------------------------------------
-    # Dataset loaded
+    # Dataset information
     # ------------------------------------------------------
 
     st.success(
@@ -596,7 +767,7 @@ if (
     )
 
     # ------------------------------------------------------
-    # Preview
+    # Dataset preview
     # ------------------------------------------------------
 
     st.subheader(
@@ -609,10 +780,26 @@ if (
     )
 
     # ------------------------------------------------------
-    # Dataset statistics
+    # Overview metrics
     # ------------------------------------------------------
 
-    col1, col2, col3, col4 = st.columns(4)
+    numerical_features = [
+        column
+        for column in df.columns
+        if pd.api.types.is_numeric_dtype(
+            df[column]
+        )
+    ]
+
+    categorical_features = [
+        column
+        for column in df.columns
+        if not pd.api.types.is_numeric_dtype(
+            df[column]
+        )
+    ]
+
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
 
@@ -631,6 +818,20 @@ if (
     with col3:
 
         st.metric(
+            "Numerical",
+            len(numerical_features)
+        )
+
+    with col4:
+
+        st.metric(
+            "Categorical",
+            len(categorical_features)
+        )
+
+    with col5:
+
+        st.metric(
             "Missing Values",
             int(
                 df.isnull()
@@ -639,15 +840,10 @@ if (
             )
         )
 
-    with col4:
-
-        st.metric(
-            "Duplicate Rows",
-            int(
-                df.duplicated()
-                .sum()
-            )
-        )
+    st.write(
+        f"**Duplicate Rows:** "
+        f"{int(df.duplicated().sum())}"
+    )
 
     # ------------------------------------------------------
     # Target
@@ -669,75 +865,124 @@ if (
     )
 
     # ======================================================
-    # QUICK EDA
+    # EDA
     # ======================================================
 
     st.divider()
 
     st.subheader(
-        "📊 Quick Exploratory Data Analysis"
+        "📊 Exploratory Data Analysis"
     )
 
-    st.write(
-        "Five features are automatically selected "
-        "for a quick analysis."
-    )
+    # ------------------------------------------------------
+    # Target analysis
+    # ------------------------------------------------------
 
-    eda_features = select_eda_features(
+    render_target_analysis(
         df,
         target_column
     )
 
-    if eda_features:
+    # ------------------------------------------------------
+    # Numerical features
+    # ------------------------------------------------------
 
-        for feature in eda_features:
+    st.subheader(
+        f"🔢 Numerical Features "
+        f"({len(numerical_features)})"
+    )
+
+    numerical_without_target = [
+        feature
+        for feature in numerical_features
+        if feature != target_column
+    ]
+
+    if numerical_without_target:
+
+        for feature in numerical_without_target:
 
             with st.expander(
-                f"🔎 Analyze: {feature}",
+                f"🔎 {feature}",
                 expanded=False
             ):
 
                 render_feature_analysis(
                     df,
-                    feature
+                    feature,
+                    target_column
                 )
 
+    else:
+
+        st.info(
+            "No numerical features available."
+        )
+
+    # ------------------------------------------------------
+    # Categorical features
+    # ------------------------------------------------------
+
+    st.subheader(
+        f"🔤 Categorical Features "
+        f"({len(categorical_features)})"
+    )
+
+    categorical_without_target = [
+        feature
+        for feature in categorical_features
+        if feature != target_column
+    ]
+
+    if categorical_without_target:
+
+        for feature in categorical_without_target:
+
+            with st.expander(
+                f"🔎 {feature}",
+                expanded=False
+            ):
+
+                render_feature_analysis(
+                    df,
+                    feature,
+                    target_column
+                )
+
+    else:
+
+        st.info(
+            "No categorical features available."
+        )
+
     # ======================================================
-    # FULL SWEETVIZ EDA
+    # SWEETVIZ
     # ======================================================
 
     st.divider()
 
     st.subheader(
-        "📊 Full Automated EDA"
+        "📋 Full EDA Report"
     )
 
     st.write(
-        "Generate a complete interactive Sweetviz report "
-        "for a deeper analysis of your dataset."
+        "The on-screen analysis above covers every feature. "
+        "If you want a comprehensive interactive report, "
+        "you can optionally generate a Sweetviz report."
     )
 
     if st.button(
-        "📊 Generate Full EDA Report",
+        "📊 Generate Full Sweetviz Report",
         use_container_width=True,
-        key="generate_full_eda_single"
+        key="generate_sweetviz_single"
     ):
 
-        with st.spinner(
-            "Generating Sweetviz report... "
-            "This may take a little while."
-        ):
-
-            generate_full_eda(
-                uploaded_file,
-                target_column
-            )
+        run_sweetviz(
+            df,
+            target_column
+        )
 
     if st.session_state.eda_generated:
-
-        st.success(
-            "✅ Full EDA report generated."
-        )
 
         st.download_button(
             label="📄 Download Full EDA Report (HTML)",
@@ -745,11 +990,11 @@ if (
             file_name="eda_report.html",
             mime="text/html",
             use_container_width=True,
-            key="download_eda_single"
+            key="download_sweetviz_single"
         )
 
     # ======================================================
-    # PROCESS DATASET
+    # PROCESS
     # ======================================================
 
     st.divider()
@@ -811,18 +1056,18 @@ if (
                 # Store ZIP
                 # --------------------------------------------------
 
-                zip_bytes = response.content
-
                 st.session_state.zip_bytes = (
-                    zip_bytes
+                    response.content
                 )
 
                 # --------------------------------------------------
-                # Extract results
+                # Extract files
                 # --------------------------------------------------
 
                 with zipfile.ZipFile(
-                    io.BytesIO(zip_bytes),
+                    io.BytesIO(
+                        response.content
+                    ),
                     "r"
                 ) as zip_file:
 
@@ -889,15 +1134,14 @@ if (
             except requests.exceptions.Timeout:
 
                 st.error(
-                    "The request timed out. "
-                    "The backend may be waking up or "
-                    "the dataset may be too large."
+                    "The request timed out."
                 )
 
             except Exception as e:
 
                 st.error(
-                    f"An unexpected error occurred: {str(e)}"
+                    f"An unexpected error occurred: "
+                    f"{str(e)}"
                 )
 
 
@@ -912,7 +1156,7 @@ if (
 ):
 
     # ------------------------------------------------------
-    # Read train
+    # Read training
     # ------------------------------------------------------
 
     try:
@@ -952,7 +1196,7 @@ if (
         st.stop()
 
     # ------------------------------------------------------
-    # Dataset information
+    # Information
     # ------------------------------------------------------
 
     st.success(
@@ -971,21 +1215,21 @@ if (
     # Preview
     # ------------------------------------------------------
 
-    train_preview_tab, test_preview_tab = st.tabs(
+    train_tab, test_tab = st.tabs(
         [
             "👀 Training Dataset Preview",
             "👀 Test Dataset Preview"
         ]
     )
 
-    with train_preview_tab:
+    with train_tab:
 
         st.dataframe(
             train_df.head(20),
             use_container_width=True
         )
 
-    with test_preview_tab:
+    with test_tab:
 
         st.dataframe(
             test_df.head(20),
@@ -1006,80 +1250,120 @@ if (
         index=len(train_df.columns) - 1,
         help=(
             "The target is selected from the training "
-            "dataset because the test dataset normally "
-            "does not contain the target."
+            "dataset."
         ),
         key="test_dataset_target"
     )
 
     # ======================================================
-    # QUICK EDA
+    # EDA
     # ======================================================
 
     st.divider()
 
     st.subheader(
-        "📊 Quick Exploratory Data Analysis"
+        "📊 Exploratory Data Analysis"
     )
 
-    st.write(
-        "EDA is performed on the training dataset because "
-        "it contains the target."
-    )
-
-    eda_features = select_eda_features(
+    render_target_analysis(
         train_df,
         target_column
     )
 
-    for feature in eda_features:
+    # ------------------------------------------------------
+    # Feature types
+    # ------------------------------------------------------
+
+    numerical_features = [
+        column
+        for column in train_df.columns
+        if pd.api.types.is_numeric_dtype(
+            train_df[column]
+        )
+        and column != target_column
+    ]
+
+    categorical_features = [
+        column
+        for column in train_df.columns
+        if not pd.api.types.is_numeric_dtype(
+            train_df[column]
+        )
+        and column != target_column
+    ]
+
+    # ------------------------------------------------------
+    # Numerical
+    # ------------------------------------------------------
+
+    st.subheader(
+        f"🔢 Numerical Features "
+        f"({len(numerical_features)})"
+    )
+
+    for feature in numerical_features:
 
         with st.expander(
-            f"🔎 Analyze: {feature}",
+            f"🔎 {feature}",
             expanded=False
         ):
 
             render_feature_analysis(
                 train_df,
-                feature
+                feature,
+                target_column
+            )
+
+    # ------------------------------------------------------
+    # Categorical
+    # ------------------------------------------------------
+
+    st.subheader(
+        f"🔤 Categorical Features "
+        f"({len(categorical_features)})"
+    )
+
+    for feature in categorical_features:
+
+        with st.expander(
+            f"🔎 {feature}",
+            expanded=False
+        ):
+
+            render_feature_analysis(
+                train_df,
+                feature,
+                target_column
             )
 
     # ======================================================
-    # FULL SWEETVIZ EDA
+    # SWEETVIZ
     # ======================================================
 
     st.divider()
 
     st.subheader(
-        "📊 Full Automated EDA"
+        "📋 Full EDA Report"
     )
 
     st.write(
-        "The full EDA report is generated from the "
-        "training dataset because the target belongs "
-        "to the training data."
+        "The on-screen analysis is based on the training "
+        "dataset. You can optionally generate a full "
+        "Sweetviz report."
     )
 
     if st.button(
-        "📊 Generate Full EDA Report",
+        "📊 Generate Full Sweetviz Report",
         use_container_width=True,
-        key="generate_full_eda_test"
+        key="generate_sweetviz_test"
     ):
 
-        with st.spinner(
-            "Generating Sweetviz report..."
-        ):
-
-            generate_full_eda(
-                train_file,
-                target_column
-            )
+        run_sweetviz(
+            train_df,
+            target_column
+        )
 
     if st.session_state.eda_generated:
-
-        st.success(
-            "✅ Full EDA report generated."
-        )
 
         st.download_button(
             label="📄 Download Full EDA Report (HTML)",
@@ -1087,11 +1371,11 @@ if (
             file_name="eda_report.html",
             mime="text/html",
             use_container_width=True,
-            key="download_eda_test"
+            key="download_sweetviz_test"
         )
 
     # ======================================================
-    # PROCESS TEST
+    # PROCESS
     # ======================================================
 
     st.divider()
@@ -1156,14 +1440,14 @@ if (
 
                     st.stop()
 
-                zip_bytes = response.content
-
                 st.session_state.zip_bytes = (
-                    zip_bytes
+                    response.content
                 )
 
                 with zipfile.ZipFile(
-                    io.BytesIO(zip_bytes),
+                    io.BytesIO(
+                        response.content
+                    ),
                     "r"
                 ) as zip_file:
 
@@ -1236,7 +1520,8 @@ if (
             except Exception as e:
 
                 st.error(
-                    f"An unexpected error occurred: {str(e)}"
+                    f"An unexpected error occurred: "
+                    f"{str(e)}"
                 )
 
 
@@ -1255,10 +1540,6 @@ if (
     st.subheader(
         "📥 Download Results"
     )
-
-    # ------------------------------------------------------
-    # Individual files
-    # ------------------------------------------------------
 
     download_items = []
 
@@ -1324,10 +1605,6 @@ if (
                     key=f"download_{filename}"
                 )
 
-    # ------------------------------------------------------
-    # ZIP
-    # ------------------------------------------------------
-
     st.download_button(
         label="📦 Download All Files (ZIP)",
         data=st.session_state.zip_bytes,
@@ -1336,10 +1613,6 @@ if (
         use_container_width=True,
         key="download_all_files"
     )
-
-    # ------------------------------------------------------
-    # Information
-    # ------------------------------------------------------
 
     if st.session_state.processed_target:
 
@@ -1350,13 +1623,13 @@ if (
 
 
 # ==========================================================
-# OUTPUT PREVIEW
+# PROCESSED DATA PREVIEW
 # ==========================================================
 
 if st.session_state.processed:
 
     # ------------------------------------------------------
-    # TRAIN PREVIEW
+    # X TRAIN
     # ------------------------------------------------------
 
     if st.session_state.x_train_bytes is not None:
@@ -1440,7 +1713,7 @@ if st.session_state.processed:
             pass
 
     # ------------------------------------------------------
-    # TEST PREVIEW
+    # X TEST
     # ------------------------------------------------------
 
     if st.session_state.x_test_bytes is not None:
