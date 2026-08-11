@@ -18,8 +18,14 @@ from sklearn.model_selection import (
     train_test_split
 )
 
-from pipeline import (
-    DataPreprocessor
+from Supervised_pipeline import (
+    SupervisedPreprocessor,
+    process_supervised_dataset
+)
+
+from unsupervised_pipeline import (
+    UnsupervisedPreprocessor,
+    process_unsupervised_dataset
 )
 
 
@@ -599,25 +605,15 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Create target-free processor
-        # --------------------------------------------------
-
-        processor = DataPreprocessor(
-            target_col=None,
-            task="unsupervised"
-        )
-
-        # --------------------------------------------------
-        # Fit + transform
+        # Use standalone unsupervised pipeline
         # --------------------------------------------------
 
         try:
 
-            X_processed = (
-                processor
-                .fit_transform_unsupervised(
-                    df
-                )
+            result = process_unsupervised_dataset(
+                df=df,
+                test_size=0.20,
+                random_state=42
             )
 
         except Exception as e:
@@ -631,33 +627,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Add IDs back
-        # --------------------------------------------------
-
-        output = add_ids(
-            X_processed,
-            df,
-            processor.id_cols
-        )
-
-        # --------------------------------------------------
-        # Pipeline information
-        # --------------------------------------------------
-
-        info = processor.get_info()
-
-        info["dataset_type"] = (
-            "Unsupervised Dataset"
-        )
-
-        info["rows_processed"] = len(df)
-
-        info_text = create_pipeline_report(
-            info
-        )
-
-        # --------------------------------------------------
-        # ZIP
+        # Return the generated train/test outputs
         # --------------------------------------------------
 
         zip_buffer = io.BytesIO()
@@ -669,15 +639,46 @@ async def process_dataset(
         ) as zip_file:
 
             zip_file.writestr(
-                "X_processed.csv",
-                output.to_csv(
+                "X_train.csv",
+                result["X_train"].to_csv(
+                    index=False
+                )
+            )
+
+            zip_file.writestr(
+                "X_test.csv",
+                result["X_test"].to_csv(
                     index=False
                 )
             )
 
             zip_file.writestr(
                 "pipeline_info.txt",
-                info_text
+                create_pipeline_report(
+                    {
+                        **result["info"],
+                        "dataset_type":
+                            "Unsupervised Dataset",
+                        "rows_processed":
+                            len(df),
+                        "task":
+                            "Unsupervised",
+                        "target":
+                            "None",
+                        "original_feature_count":
+                            result["info"].get(
+                                "feature_count_before_processing",
+                                0
+                            ),
+                        "selected_feature_count":
+                            result["info"].get(
+                                "final_feature_count",
+                                0
+                            ),
+                        "feature_selection_method":
+                            "None"
+                    }
+                )
             )
 
         zip_buffer.seek(0)
@@ -748,58 +749,17 @@ async def process_dataset(
                 )
             )
 
-        X = df.drop(
-            columns=[target]
-        )
-
-        y = df[target]
-
-        processor = DataPreprocessor(
-            target_col=target
-        )
-
-        task = processor._detect_task(
-            y
-        )
-
         # --------------------------------------------------
-        # Split
-        # --------------------------------------------------
-
-        if task == "classification":
-
-            X_train, X_test, y_train, y_test = (
-                train_test_split(
-                    X,
-                    y,
-                    test_size=0.2,
-                    random_state=42,
-                    stratify=y
-                )
-            )
-
-        else:
-
-            X_train, X_test, y_train, y_test = (
-                train_test_split(
-                    X,
-                    y,
-                    test_size=0.2,
-                    random_state=42
-                )
-            )
-
-        # --------------------------------------------------
-        # Fit
+        # Use standalone supervised pipeline
         # --------------------------------------------------
 
         try:
 
-            X_train_processed = (
-                processor.fit_transform(
-                    X_train,
-                    y_train
-                )
+            result = process_supervised_dataset(
+                df=df,
+                target_col=target,
+                test_size=0.20,
+                random_state=42
             )
 
         except Exception as e:
@@ -807,92 +767,13 @@ async def process_dataset(
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    "Pipeline fitting failed: "
-                    f"{str(e)}"
+                    "Supervised preprocessing "
+                    f"failed: {str(e)}"
                 )
             )
 
         # --------------------------------------------------
-        # Transform test
-        # --------------------------------------------------
-
-        try:
-
-            X_test_processed, test_ids = (
-                processor.transform(
-                    X_test
-                )
-            )
-
-        except Exception as e:
-
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "Test transformation failed: "
-                    f"{str(e)}"
-                )
-            )
-
-        # --------------------------------------------------
-        # Training output
-        # --------------------------------------------------
-
-        train_output = (
-            X_train_processed.copy()
-        )
-
-        train_output[target] = (
-            y_train.values
-        )
-
-        train_output = add_ids(
-            train_output,
-            X_train,
-            processor.id_cols
-        )
-
-        # --------------------------------------------------
-        # Test output
-        # --------------------------------------------------
-
-        test_output = (
-            X_test_processed.copy()
-        )
-
-        if not test_ids.empty:
-
-            test_output = pd.concat(
-                [
-                    test_ids.reset_index(
-                        drop=True
-                    ),
-
-                    test_output.reset_index(
-                        drop=True
-                    )
-                ],
-                axis=1
-            )
-
-        # --------------------------------------------------
-        # Report
-        # --------------------------------------------------
-
-        info = processor.get_info()
-
-        info["dataset_type"] = (
-            dataset_type
-        )
-
-        info["rows_processed"] = len(df)
-
-        info_text = create_pipeline_report(
-            info
-        )
-
-        # --------------------------------------------------
-        # ZIP
+        # Return generated train/test outputs
         # --------------------------------------------------
 
         zip_buffer = io.BytesIO()
@@ -905,21 +786,37 @@ async def process_dataset(
 
             zip_file.writestr(
                 "X_train.csv",
-                train_output.to_csv(
+                result["X_train"].to_csv(
                     index=False
                 )
             )
 
             zip_file.writestr(
                 "X_test.csv",
-                test_output.to_csv(
+                result["X_test"].to_csv(
                     index=False
                 )
             )
 
             zip_file.writestr(
                 "pipeline_info.txt",
-                info_text
+                create_pipeline_report(
+                    {
+                        **result["info"],
+                        "dataset_type":
+                            dataset_type,
+                        "rows_processed":
+                            len(df),
+                        "feature_selection_method":
+                            (
+                                "Lasso"
+                                if result["task"] ==
+                                "regression"
+                                else
+                                "L1 Logistic Regression"
+                            )
+                    }
+                )
             )
 
         zip_buffer.seek(0)
@@ -965,7 +862,7 @@ async def process_dataset(
 
         y_train = df[target]
 
-        processor = DataPreprocessor(
+        processor = SupervisedPreprocessor(
             target_col=target
         )
 
@@ -1109,7 +1006,7 @@ async def process_dataset(
                 columns=[target]
             )
 
-        processor = DataPreprocessor(
+        processor = SupervisedPreprocessor(
             target_col=target
         )
 

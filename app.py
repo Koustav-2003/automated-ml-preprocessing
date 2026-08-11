@@ -2002,20 +2002,39 @@ else:
                                 zip_file.namelist()
                             )
 
-                            if (
-                                "X_processed.csv"
-                                in files_in_zip
-                            ):
+                            # The unsupervised pipeline now returns
+                            # X_train.csv and X_test.csv, just like the
+                            # supervised pipeline. Keep the same output
+                            # handling for both learning types.
 
-                                st.session_state.processed_bytes = (
+                            if "X_train.csv" in files_in_zip:
+
+                                st.session_state.x_train_bytes = (
                                     zip_file.read(
-                                        "X_processed.csv"
+                                        "X_train.csv"
                                     )
                                 )
 
                             else:
 
-                                st.session_state.processed_bytes = None
+                                st.session_state.x_train_bytes = None
+
+                            if "X_test.csv" in files_in_zip:
+
+                                st.session_state.x_test_bytes = (
+                                    zip_file.read(
+                                        "X_test.csv"
+                                    )
+                                )
+
+                            else:
+
+                                st.session_state.x_test_bytes = None
+
+                            # Keep processed_bytes for backward compatibility
+                            # with any existing session state, but the actual
+                            # unsupervised outputs are X_train/X_test.
+                            st.session_state.processed_bytes = None
 
                             if (
                                 "pipeline_info.txt"
@@ -2031,9 +2050,6 @@ else:
                             else:
 
                                 st.session_state.pipeline_info_bytes = None
-
-                        st.session_state.x_train_bytes = None
-                        st.session_state.x_test_bytes = None
 
                         st.session_state.processed = True
 
@@ -2104,18 +2120,34 @@ if (
         == "Unsupervised Dataset"
     ):
 
+        # Unsupervised preprocessing now produces the same train/test
+        # structure as supervised preprocessing.
         if (
-            st.session_state.processed_bytes
+            st.session_state.x_train_bytes
             is not None
         ):
 
             st.download_button(
-                label="⬇️ Download Processed Dataset",
-                data=st.session_state.processed_bytes,
-                file_name="X_processed.csv",
+                label="⬇️ Download X_train.csv",
+                data=st.session_state.x_train_bytes,
+                file_name="X_train.csv",
                 mime="text/csv",
                 use_container_width=True,
-                key="download_unsupervised_processed"
+                key="download_unsupervised_x_train"
+            )
+
+        if (
+            st.session_state.x_test_bytes
+            is not None
+        ):
+
+            st.download_button(
+                label="⬇️ Download X_test.csv",
+                data=st.session_state.x_test_bytes,
+                file_name="X_test.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="download_unsupervised_x_test"
             )
 
         if (
@@ -2222,17 +2254,37 @@ if st.session_state.processed:
     ):
 
         if (
-            st.session_state.processed_bytes
-            is not None
+            st.session_state.x_train_bytes is not None
+            or
+            st.session_state.x_test_bytes is not None
         ):
 
             try:
 
-                processed_df = pd.read_csv(
-                    io.BytesIO(
-                        st.session_state.processed_bytes
+                unsup_train_preview = None
+                unsup_test_preview = None
+
+                if (
+                    st.session_state.x_train_bytes
+                    is not None
+                ):
+
+                    unsup_train_preview = pd.read_csv(
+                        io.BytesIO(
+                            st.session_state.x_train_bytes
+                        )
                     )
-                )
+
+                if (
+                    st.session_state.x_test_bytes
+                    is not None
+                ):
+
+                    unsup_test_preview = pd.read_csv(
+                        io.BytesIO(
+                            st.session_state.x_test_bytes
+                        )
+                    )
 
                 st.divider()
 
@@ -2241,7 +2293,42 @@ if st.session_state.processed:
                 )
 
                 st.caption(
-                    "Preview of the processed feature matrix."
+                    "Preview of the processed unsupervised "
+                    "training and testing outputs."
+                )
+
+                train_rows = (
+                    len(unsup_train_preview)
+                    if unsup_train_preview is not None
+                    else 0
+                )
+
+                test_rows = (
+                    len(unsup_test_preview)
+                    if unsup_test_preview is not None
+                    else 0
+                )
+
+                reference_df = (
+                    unsup_train_preview
+                    if unsup_train_preview is not None
+                    else unsup_test_preview
+                )
+
+                output_features = (
+                    reference_df.shape[1]
+                    if reference_df is not None
+                    else 0
+                )
+
+                missing_values = (
+                    int(
+                        reference_df.isnull()
+                        .sum()
+                        .sum()
+                    )
+                    if reference_df is not None
+                    else 0
                 )
 
                 col1, col2, col3, col4 = st.columns(4)
@@ -2249,40 +2336,75 @@ if st.session_state.processed:
                 with col1:
 
                     st.metric(
-                        "Rows",
-                        f"{processed_df.shape[0]:,}"
+                        "Training Rows",
+                        f"{train_rows:,}"
                     )
 
                 with col2:
 
                     st.metric(
-                        "Output Features",
-                        f"{processed_df.shape[1]:,}"
+                        "Test Rows",
+                        f"{test_rows:,}"
                     )
 
                 with col3:
 
                     st.metric(
-                        "Missing Values",
-                        f"{int(processed_df.isnull().sum().sum()):,}"
+                        "Output Features",
+                        f"{output_features:,}"
                     )
 
                 with col4:
 
                     st.metric(
-                        "Duplicate Rows",
-                        f"{int(processed_df.duplicated().sum()):,}"
+                        "Missing Values",
+                        f"{missing_values:,}"
                     )
 
-                st.dataframe(
-                    processed_df.head(20),
-                    use_container_width=True
+                train_tab, test_tab = st.tabs(
+                    [
+                        "X_train.csv",
+                        "X_test.csv"
+                    ]
                 )
+
+                with train_tab:
+
+                    if unsup_train_preview is not None:
+
+                        st.dataframe(
+                            unsup_train_preview.head(20),
+                            use_container_width=True
+                        )
+
+                    else:
+
+                        st.info(
+                            "No processed training dataset "
+                            "was returned."
+                        )
+
+                with test_tab:
+
+                    if unsup_test_preview is not None:
+
+                        st.dataframe(
+                            unsup_test_preview.head(20),
+                            use_container_width=True
+                        )
+
+                    else:
+
+                        st.info(
+                            "No processed test dataset "
+                            "was returned."
+                        )
 
             except Exception as e:
 
                 st.warning(
-                    f"Could not display processed dataset: {str(e)}"
+                    "Could not display processed unsupervised "
+                    f"output: {str(e)}"
                 )
 
     # ======================================================
