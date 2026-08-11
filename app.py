@@ -1079,6 +1079,19 @@ if ml_task == "Supervised Learning":
             "pipeline will be fitted only on the training data."
         )
 
+        supervised_test_size_percent = st.number_input(
+            "Test dataset size (%)",
+            min_value=1,
+            max_value=99,
+            value=20,
+            step=1,
+            help=(
+                "Percentage of the complete dataset to reserve "
+                "for testing. Default is 20%."
+            ),
+            key="supervised_test_size_percent"
+        )
+
         uploaded_file = st.file_uploader(
             "📁 Upload your complete dataset",
             type=["csv"],
@@ -1329,7 +1342,10 @@ if ml_task == "Supervised Learning":
                                 dataset_type,
 
                             "target":
-                                target_column
+                                target_column,
+
+                            "test_size":
+                                supervised_test_size_percent / 100
                         },
 
                         timeout=300
@@ -1837,9 +1853,22 @@ else:
 
         st.info(
             "Your complete dataset will be automatically split "
-            "into training and testing sets using an 80/20 split. "
-            "The unsupervised preprocessing pipeline will be "
-            "fitted only on the training data."
+            "into training and testing sets. The unsupervised "
+            "preprocessing pipeline will be fitted only on "
+            "the training data."
+        )
+
+        unsupervised_test_size_percent = st.number_input(
+            "Test dataset size (%)",
+            min_value=1,
+            max_value=99,
+            value=20,
+            step=1,
+            help=(
+                "Percentage of the complete dataset to reserve "
+                "for testing. Default is 20%."
+            ),
+            key="unsupervised_test_size_percent"
         )
 
         unsupervised_file = st.file_uploader(
@@ -2166,7 +2195,15 @@ else:
                                 "Unsupervised Learning",
 
                             "dataset_type":
-                                unsupervised_dataset_type
+                                unsupervised_dataset_type,
+
+                            "test_size":
+                                (
+                                    unsupervised_test_size_percent / 100
+                                    if unsupervised_dataset_type
+                                    == "Entire Dataset"
+                                    else 0.20
+                                )
                         },
 
                         timeout=300

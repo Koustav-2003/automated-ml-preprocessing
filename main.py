@@ -541,6 +541,10 @@ async def process_dataset(
         None
     ),
 
+    test_size: float = Form(
+        0.20
+    ),
+
     # Entire / Training / Unsupervised
     file: UploadFile = File(
         None
@@ -573,6 +577,20 @@ async def process_dataset(
                 "Invalid ML task. Choose "
                 "Supervised Learning or "
                 "Unsupervised Learning."
+            )
+        )
+
+    # ======================================================
+    # VALIDATE TEST SIZE
+    # ======================================================
+
+    if not 0 < test_size < 1:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Test size must be between 0 and 1 "
+                "(for example, 0.20 for 20%)."
             )
         )
 
@@ -636,7 +654,7 @@ async def process_dataset(
 
                 result = process_unsupervised_dataset(
                     df=df,
-                    test_size=0.20,
+                    test_size=test_size,
                     random_state=42
                 )
 
@@ -1147,7 +1165,7 @@ async def process_dataset(
             result = process_supervised_dataset(
                 df=df,
                 target_col=target,
-                test_size=0.20,
+                test_size=test_size,
                 random_state=42
             )
 
