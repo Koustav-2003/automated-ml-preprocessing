@@ -1399,7 +1399,7 @@ async def process_dataset(
             target_col=target
         )
 
-        task = processor._detect_task(
+        task = processor.detect_task(
             y_train
         )
 
