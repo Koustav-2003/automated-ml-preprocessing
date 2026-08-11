@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 import requests
 import io
 import zipfile
@@ -14,7 +15,7 @@ API_URL = (
 
 
 # ==========================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # ==========================================================
 
 st.set_page_config(
@@ -25,13 +26,36 @@ st.set_page_config(
 
 
 # ==========================================================
+# SESSION STATE
+# ==========================================================
+
+if "processed" not in st.session_state:
+    st.session_state.processed = False
+
+if "zip_bytes" not in st.session_state:
+    st.session_state.zip_bytes = None
+
+if "x_train_bytes" not in st.session_state:
+    st.session_state.x_train_bytes = None
+
+if "x_test_bytes" not in st.session_state:
+    st.session_state.x_test_bytes = None
+
+if "pipeline_info_bytes" not in st.session_state:
+    st.session_state.pipeline_info_bytes = None
+
+if "processed_target" not in st.session_state:
+    st.session_state.processed_target = None
+
+
+# ==========================================================
 # TITLE
 # ==========================================================
 
 st.title("⚙️ Auto ML Preprocessor")
 
 st.write(
-    "Upload your dataset and automatically perform "
+    "Upload your CSV dataset and automatically perform "
     "data preprocessing, feature engineering, scaling "
     "and feature selection."
 )
@@ -48,73 +72,113 @@ uploaded_file = st.file_uploader(
 
 
 # ==========================================================
-# PROCESS DATASET
+# WHEN FILE IS UPLOADED
 # ==========================================================
 
 if uploaded_file is not None:
 
-    # ------------------------------------------
-    # Read uploaded dataset
-    # ------------------------------------------
+    # ------------------------------------------------------
+    # Read CSV
+    # ------------------------------------------------------
 
     try:
 
-        df = __import__("pandas").read_csv(
+        uploaded_file.seek(0)
+
+        df = pd.read_csv(
             uploaded_file
         )
 
     except Exception as e:
 
         st.error(
-            f"Could not read the CSV file: {str(e)}"
+            f"Could not read CSV file: {str(e)}"
         )
 
         st.stop()
 
-    # ------------------------------------------
+    # ------------------------------------------------------
     # Dataset information
-    # ------------------------------------------
+    # ------------------------------------------------------
 
     st.success(
-        f"Dataset loaded successfully: "
+        f"Dataset loaded successfully — "
         f"{df.shape[0]} rows × {df.shape[1]} columns"
     )
 
-    # ------------------------------------------
-    # Target selection
-    # ------------------------------------------
+    # ------------------------------------------------------
+    # Preview
+    # ------------------------------------------------------
 
-    target_column = st.selectbox(
-        "Select Target Column",
-        options=df.columns
-    )
+    st.subheader("👀 Dataset Preview")
 
-    # ------------------------------------------
-    # Process button
-    # ------------------------------------------
-
-    process_button = st.button(
-        "🚀 Process Dataset",
+    st.dataframe(
+        df.head(20),
         use_container_width=True
     )
 
-    if process_button:
+    # ------------------------------------------------------
+    # Dataset information
+    # ------------------------------------------------------
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.metric(
+            "Rows",
+            df.shape[0]
+        )
+
+    with col2:
+
+        st.metric(
+            "Columns",
+            df.shape[1]
+        )
+
+    with col3:
+
+        st.metric(
+            "Missing Values",
+            int(df.isnull().sum().sum())
+        )
+
+    # ------------------------------------------------------
+    # Target column
+    # ------------------------------------------------------
+
+    st.subheader("🎯 Target Selection")
+
+    target_column = st.selectbox(
+        "Select the target column",
+        options=df.columns
+    )
+
+    # ======================================================
+    # PROCESS DATASET
+    # ======================================================
+
+    if st.button(
+        "🚀 Process Dataset",
+        use_container_width=True
+    ):
 
         with st.spinner(
-            "Processing dataset... This may take a moment."
+            "Processing dataset... Please wait."
         ):
 
             try:
 
-                # ----------------------------------
+                # ------------------------------------------
                 # Reset file pointer
-                # ----------------------------------
+                # ------------------------------------------
 
                 uploaded_file.seek(0)
 
-                # ----------------------------------
-                # Send file to FastAPI
-                # ----------------------------------
+                # ------------------------------------------
+                # Send request to FastAPI
+                # ------------------------------------------
 
                 response = requests.post(
                     API_URL,
@@ -131,9 +195,9 @@ if uploaded_file is not None:
                     timeout=300
                 )
 
-                # ----------------------------------
-                # Handle API errors
-                # ----------------------------------
+                # ------------------------------------------
+                # API error
+                # ------------------------------------------
 
                 if response.status_code != 200:
 
@@ -158,23 +222,28 @@ if uploaded_file is not None:
 
                     st.stop()
 
-                # ----------------------------------
-                # Get ZIP from API
-                # ----------------------------------
+                # ------------------------------------------
+                # Store ZIP in session state
+                # ------------------------------------------
 
                 zip_bytes = response.content
 
-                # ----------------------------------
-                # Extract files from ZIP
-                # ----------------------------------
+                st.session_state.zip_bytes = (
+                    zip_bytes
+                )
+
+                # ------------------------------------------
+                # Extract individual files
+                # ------------------------------------------
 
                 with zipfile.ZipFile(
                     io.BytesIO(zip_bytes),
                     "r"
                 ) as zip_file:
 
-                    # Check files returned by API
-                    files_in_zip = zip_file.namelist()
+                    files_in_zip = (
+                        zip_file.namelist()
+                    )
 
                     required_files = [
                         "X_train.csv",
@@ -191,107 +260,174 @@ if uploaded_file is not None:
                     if missing_files:
 
                         st.error(
-                            "The API response is missing "
-                            f"the following files: "
-                            f"{', '.join(missing_files)}"
+                            "The API did not return "
+                            "the expected files: "
+                            + ", ".join(
+                                missing_files
+                            )
                         )
 
                         st.stop()
 
-                    # Extract individual files
-                    x_train_bytes = zip_file.read(
-                        "X_train.csv"
+                    # ----------------------------------
+                    # Save files in session state
+                    # ----------------------------------
+
+                    st.session_state.x_train_bytes = (
+                        zip_file.read(
+                            "X_train.csv"
+                        )
                     )
 
-                    x_test_bytes = zip_file.read(
-                        "X_test.csv"
+                    st.session_state.x_test_bytes = (
+                        zip_file.read(
+                            "X_test.csv"
+                        )
                     )
 
-                    pipeline_info_bytes = zip_file.read(
-                        "pipeline_info.txt"
+                    st.session_state.pipeline_info_bytes = (
+                        zip_file.read(
+                            "pipeline_info.txt"
+                        )
                     )
 
-                # ----------------------------------
-                # Success message
-                # ----------------------------------
+                # ------------------------------------------
+                # Store processing state
+                # ------------------------------------------
+
+                st.session_state.processed = True
+
+                st.session_state.processed_target = (
+                    target_column
+                )
 
                 st.success(
-                    "Dataset processed successfully!"
+                    "✅ Dataset processed successfully!"
                 )
 
-                # ----------------------------------
-                # Download section
-                # ----------------------------------
-
-                st.subheader(
-                    "📥 Download Results"
-                )
-
-                # ----------------------------------
-                # Three individual buttons
-                # ----------------------------------
-
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-
-                    st.download_button(
-                        label="⬇️ X_train.csv",
-                        data=x_train_bytes,
-                        file_name="X_train.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-
-                with col2:
-
-                    st.download_button(
-                        label="⬇️ X_test.csv",
-                        data=x_test_bytes,
-                        file_name="X_test.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-
-                with col3:
-
-                    st.download_button(
-                        label="📄 Pipeline Info",
-                        data=pipeline_info_bytes,
-                        file_name="pipeline_info.txt",
-                        mime="text/plain",
-                        use_container_width=True
-                    )
-
-                # ----------------------------------
-                # ZIP download
-                # ----------------------------------
-
-                st.download_button(
-                    label="📦 Download All Files (ZIP)",
-                    data=zip_bytes,
-                    file_name="processed_dataset.zip",
-                    mime="application/zip",
-                    use_container_width=True
-                )
-
-            except requests.exceptions.Timeout:
-
-                st.error(
-                    "The processing request timed out. "
-                    "The dataset may be too large or the "
-                    "backend may be waking up."
-                )
+            # ----------------------------------------------
+            # Connection error
+            # ----------------------------------------------
 
             except requests.exceptions.ConnectionError:
 
                 st.error(
-                    "Could not connect to the preprocessing "
-                    "API. Please try again."
+                    "Could not connect to the preprocessing API."
                 )
+
+            # ----------------------------------------------
+            # Timeout
+            # ----------------------------------------------
+
+            except requests.exceptions.Timeout:
+
+                st.error(
+                    "The request timed out. "
+                    "The backend may be waking up or "
+                    "the dataset may be too large."
+                )
+
+            # ----------------------------------------------
+            # General error
+            # ----------------------------------------------
 
             except Exception as e:
 
                 st.error(
                     f"An unexpected error occurred: {str(e)}"
                 )
+
+
+# ==========================================================
+# DOWNLOAD SECTION
+# ==========================================================
+
+if (
+    st.session_state.processed
+    and st.session_state.zip_bytes is not None
+):
+
+    st.divider()
+
+    st.subheader("📥 Download Results")
+
+    st.write(
+        "Your processed files are ready. "
+        "You can download them individually or "
+        "download everything as a ZIP."
+    )
+
+    # ======================================================
+    # THREE INDIVIDUAL DOWNLOAD BUTTONS
+    # ======================================================
+
+    col1, col2, col3 = st.columns(3)
+
+    # ------------------------------------------------------
+    # X TRAIN
+    # ------------------------------------------------------
+
+    with col1:
+
+        st.download_button(
+            label="⬇️ X_train.csv",
+            data=st.session_state.x_train_bytes,
+            file_name="X_train.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_x_train"
+        )
+
+    # ------------------------------------------------------
+    # X TEST
+    # ------------------------------------------------------
+
+    with col2:
+
+        st.download_button(
+            label="⬇️ X_test.csv",
+            data=st.session_state.x_test_bytes,
+            file_name="X_test.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_x_test"
+        )
+
+    # ------------------------------------------------------
+    # PIPELINE INFO
+    # ------------------------------------------------------
+
+    with col3:
+
+        st.download_button(
+            label="📄 Pipeline Info",
+            data=st.session_state.pipeline_info_bytes,
+            file_name="pipeline_info.txt",
+            mime="text/plain",
+            use_container_width=True,
+            key="download_pipeline_info"
+        )
+
+    # ======================================================
+    # ZIP DOWNLOAD
+    # ======================================================
+
+    st.download_button(
+        label="📦 Download All Files (ZIP)",
+        data=st.session_state.zip_bytes,
+        file_name="processed_dataset.zip",
+        mime="application/zip",
+        use_container_width=True,
+        key="download_all_files"
+    )
+
+    # ======================================================
+    # PROCESSING COMPLETE INFO
+    # ======================================================
+
+    if st.session_state.processed_target:
+
+        st.info(
+            f"Processed target: "
+            f"**{st.session_state.processed_target}**"
+        )
