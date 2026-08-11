@@ -1039,26 +1039,13 @@ def render_sweetviz_section(
 # LEARNING TYPE CARD
 # ==========================================================
 
-st.markdown(
-    textwrap.dedent(
-        """
-        <div class="section-card">
-
-            <div class="section-card-title">
-                🧠 Choose your learning type
-            </div>
-
-            <div class="section-card-description">
-                Choose supervised learning when your dataset
-                contains a target variable. Choose unsupervised
-                learning when there is no target variable.
-            </div>
-
-        </div>
-        """
-    ),
-    unsafe_allow_html=True
-)
+with st.container(border=True):
+    st.subheader("🧠 Choose your learning type")
+    st.caption(
+        "Choose supervised learning when your dataset contains "
+        "a target variable. Choose unsupervised learning when "
+        "there is no target variable."
+    )
 
 
 # ==========================================================
@@ -1097,24 +1084,11 @@ st.session_state.previous_ml_task = ml_task
 
 if ml_task == "Supervised Learning":
 
-    st.markdown(
-        textwrap.dedent(
-            """
-            <div class="section-card">
-
-                <div class="section-card-title">
-                    📂 Choose your dataset workflow
-                </div>
-
-                <div class="section-card-description">
-                    Select how your supervised dataset is structured.
-                </div>
-
-            </div>
-            """
-        ),
-        unsafe_allow_html=True
-    )
+    with st.container(border=True):
+        st.subheader("📂 Choose your dataset workflow")
+        st.caption(
+            "Select how your supervised dataset is structured."
+        )
 
     dataset_type = st.radio(
         "Select dataset type:",
@@ -1839,26 +1813,13 @@ if ml_task == "Supervised Learning":
 
 else:
 
-    st.markdown(
-        textwrap.dedent(
-            """
-            <div class="section-card">
-
-                <div class="section-card-title">
-                    🔬 Unsupervised Processing
-                </div>
-
-                <div class="section-card-description">
-                    No target variable is used. The pipeline will
-                    process the complete feature matrix and prepare
-                    it for unsupervised learning.
-                </div>
-
-            </div>
-            """
-        ),
-        unsafe_allow_html=True
-    )
+    with st.container(border=True):
+        st.subheader("🔬 Unsupervised Processing")
+        st.caption(
+            "No target variable is used. The pipeline will process "
+            "the complete feature matrix and prepare it for "
+            "unsupervised learning."
+        )
 
     st.info(
         "🔬 No target variable is used in the unsupervised workflow."
@@ -2170,24 +2131,11 @@ if (
 
     st.divider()
 
-    st.markdown(
-        textwrap.dedent(
-            """
-            <div class="download-card">
-
-                <div class="download-title">
-                    📥 Processed Dataset Ready
-                </div>
-
-                <div class="download-description">
-                    Your processed outputs are ready to download.
-                </div>
-
-            </div>
-            """
-        ),
-        unsafe_allow_html=True
-    )
+    with st.container(border=True):
+        st.subheader("📥 Processed Dataset Ready")
+        st.caption(
+            "Your processed outputs are ready to download."
+        )
 
     # ======================================================
     # UNSUPERVISED DOWNLOAD
@@ -2511,14 +2459,7 @@ if st.session_state.processed:
 # FOOTER
 # ==========================================================
 
-st.markdown(
-    textwrap.dedent(
-        """
-        <div class="footer">
-            Auto ML Preprocessor · Automated EDA ·
-            Feature Engineering · Feature Selection
-        </div>
-        """
-    ),
-    unsafe_allow_html=True
+st.caption(
+    "Auto ML Preprocessor · Automated EDA · "
+    "Feature Engineering · Feature Selection"
 )
