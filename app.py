@@ -44,6 +44,9 @@ if "x_test_bytes" not in st.session_state:
 if "pipeline_info_bytes" not in st.session_state:
     st.session_state.pipeline_info_bytes = None
 
+if "eda_report_bytes" not in st.session_state:
+    st.session_state.eda_report_bytes = None
+
 if "processed_target" not in st.session_state:
     st.session_state.processed_target = None
 
@@ -70,9 +73,261 @@ def clear_results():
 
     st.session_state.pipeline_info_bytes = None
 
+    st.session_state.eda_report_bytes = None
+
     st.session_state.processed_target = None
 
     st.session_state.processed_dataset_type = None
+
+
+# ==========================================================
+# HELPER - FEATURE ANALYSIS
+# ==========================================================
+
+def render_feature_analysis(df, feature):
+
+    st.markdown(
+        f"### 🔎 {feature}"
+    )
+
+    data = df[feature]
+
+    # ------------------------------------------------------
+    # Numerical Feature
+    # ------------------------------------------------------
+
+    if pd.api.types.is_numeric_dtype(data):
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+
+            st.metric(
+                "Type",
+                "Numerical"
+            )
+
+        with col2:
+
+            st.metric(
+                "Missing",
+                int(data.isnull().sum())
+            )
+
+        with col3:
+
+            st.metric(
+                "Unique Values",
+                int(data.nunique())
+            )
+
+        with col4:
+
+            st.metric(
+                "Mean",
+                f"{data.mean():.3f}"
+            )
+
+        stats_col1, stats_col2 = st.columns(2)
+
+        with stats_col1:
+
+            st.write("**Distribution**")
+
+            st.bar_chart(
+                data.dropna()
+                .value_counts()
+                .sort_index()
+            )
+
+        with stats_col2:
+
+            st.write("**Summary Statistics**")
+
+            stats = pd.DataFrame({
+                "Statistic": [
+                    "Mean",
+                    "Median",
+                    "Std Dev",
+                    "Minimum",
+                    "Maximum",
+                    "Skewness"
+                ],
+                "Value": [
+                    data.mean(),
+                    data.median(),
+                    data.std(),
+                    data.min(),
+                    data.max(),
+                    data.skew()
+                ]
+            })
+
+            st.dataframe(
+                stats,
+                hide_index=True,
+                use_container_width=True
+            )
+
+    # ------------------------------------------------------
+    # Categorical Feature
+    # ------------------------------------------------------
+
+    else:
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+
+            st.metric(
+                "Type",
+                "Categorical"
+            )
+
+        with col2:
+
+            st.metric(
+                "Missing",
+                int(data.isnull().sum())
+            )
+
+        with col3:
+
+            st.metric(
+                "Unique Values",
+                int(data.nunique())
+            )
+
+        st.write("**Top Categories**")
+
+        value_counts = (
+            data.fillna("Missing")
+            .astype(str)
+            .value_counts()
+            .head(10)
+        )
+
+        st.bar_chart(
+            value_counts
+        )
+
+
+# ==========================================================
+# HELPER - SELECT FIVE FEATURES
+# ==========================================================
+
+def select_eda_features(
+    df,
+    target=None
+):
+
+    available_features = [
+        column
+        for column in df.columns
+        if column != target
+    ]
+
+    if not available_features:
+
+        return []
+
+    # ------------------------------------------------------
+    # Calculate feature scores
+    # ------------------------------------------------------
+
+    scored_features = []
+
+    for feature in available_features:
+
+        series = df[feature]
+
+        missing_ratio = (
+            series.isnull().mean()
+        )
+
+        # Numerical features get preference if they have
+        # meaningful variation.
+
+        if pd.api.types.is_numeric_dtype(series):
+
+            unique_count = series.nunique()
+
+            if unique_count > 1:
+
+                try:
+
+                    skewness = abs(
+                        series.skew()
+                    )
+
+                    if pd.isna(skewness):
+
+                        skewness = 0
+
+                except Exception:
+
+                    skewness = 0
+
+            else:
+
+                skewness = 0
+
+            score = (
+                missing_ratio * 2
+                + min(skewness, 10) / 10
+                + 0.2
+            )
+
+        else:
+
+            unique_count = series.nunique()
+
+            score = (
+                missing_ratio * 2
+                + min(unique_count, 50) / 50
+            )
+
+        scored_features.append(
+            (
+                feature,
+                score
+            )
+        )
+
+    # ------------------------------------------------------
+    # Sort by score
+    # ------------------------------------------------------
+
+    scored_features.sort(
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    selected = [
+        feature
+        for feature, score
+        in scored_features[:5]
+    ]
+
+    # ------------------------------------------------------
+    # If fewer than 5 features exist
+    # ------------------------------------------------------
+
+    if len(selected) < 5:
+
+        for feature in available_features:
+
+            if feature not in selected:
+
+                selected.append(
+                    feature
+                )
+
+            if len(selected) == 5:
+
+                break
+
+    return selected[:5]
 
 
 # ==========================================================
@@ -83,8 +338,8 @@ st.title("⚙️ Auto ML Preprocessor")
 
 st.write(
     "Upload your dataset and automatically perform "
-    "data preprocessing, feature engineering, scaling "
-    "and feature selection."
+    "exploratory data analysis, preprocessing, "
+    "feature engineering, scaling and feature selection."
 )
 
 
@@ -160,11 +415,6 @@ else:
 # FILE UPLOAD
 # ==========================================================
 
-
-# ==========================================================
-# ENTIRE DATASET
-# ==========================================================
-
 if dataset_type == "Entire Dataset":
 
     uploaded_file = st.file_uploader(
@@ -176,11 +426,6 @@ if dataset_type == "Entire Dataset":
     train_file = None
     test_file = None
 
-
-# ==========================================================
-# TRAINING DATASET
-# ==========================================================
-
 elif dataset_type == "Training Dataset":
 
     uploaded_file = st.file_uploader(
@@ -191,11 +436,6 @@ elif dataset_type == "Training Dataset":
 
     train_file = None
     test_file = None
-
-
-# ==========================================================
-# TEST DATASET
-# ==========================================================
 
 else:
 
@@ -215,13 +455,16 @@ else:
 
 
 # ==========================================================
-# ENTIRE / TRAINING DATASET PROCESSING
+# ENTIRE / TRAINING DATASET
 # ==========================================================
 
-if dataset_type in [
-    "Entire Dataset",
-    "Training Dataset"
-] and uploaded_file is not None:
+if (
+    dataset_type in [
+        "Entire Dataset",
+        "Training Dataset"
+    ]
+    and uploaded_file is not None
+):
 
     # ------------------------------------------------------
     # Read CSV
@@ -267,7 +510,7 @@ if dataset_type in [
     # Dataset statistics
     # ------------------------------------------------------
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
 
@@ -294,6 +537,16 @@ if dataset_type in [
             )
         )
 
+    with col4:
+
+        st.metric(
+            "Duplicate Rows",
+            int(
+                df.duplicated()
+                .sum()
+            )
+        )
+
     # ------------------------------------------------------
     # Target
     # ------------------------------------------------------
@@ -312,6 +565,44 @@ if dataset_type in [
     )
 
     # ======================================================
+    # EDA
+    # ======================================================
+
+    st.divider()
+
+    st.subheader("📊 Exploratory Data Analysis")
+
+    st.write(
+        "The following five features have been selected "
+        "automatically for a quick analysis."
+    )
+
+    eda_features = select_eda_features(
+        df,
+        target_column
+    )
+
+    if eda_features:
+
+        for feature in eda_features:
+
+            with st.expander(
+                f"🔎 Analyze: {feature}",
+                expanded=False
+            ):
+
+                render_feature_analysis(
+                    df,
+                    feature
+                )
+
+    else:
+
+        st.info(
+            "No features are available for analysis."
+        )
+
+    # ======================================================
     # PROCESS BUTTON
     # ======================================================
 
@@ -322,20 +613,13 @@ if dataset_type in [
     ):
 
         with st.spinner(
-            "Processing dataset... Please wait."
+            "Running EDA and preprocessing... "
+            "Please wait."
         ):
 
             try:
 
-                # ------------------------------------------
-                # Reset file pointer
-                # ------------------------------------------
-
                 uploaded_file.seek(0)
-
-                # ------------------------------------------
-                # Send request
-                # ------------------------------------------
 
                 response = requests.post(
                     API_URL,
@@ -352,10 +636,6 @@ if dataset_type in [
                     },
                     timeout=300
                 )
-
-                # ------------------------------------------
-                # Handle API error
-                # ------------------------------------------
 
                 if response.status_code != 200:
 
@@ -380,9 +660,9 @@ if dataset_type in [
 
                     st.stop()
 
-                # ------------------------------------------
+                # --------------------------------------------------
                 # Store ZIP
-                # ------------------------------------------
+                # --------------------------------------------------
 
                 zip_bytes = response.content
 
@@ -390,9 +670,9 @@ if dataset_type in [
                     zip_bytes
                 )
 
-                # ------------------------------------------
-                # Extract files
-                # ------------------------------------------
+                # --------------------------------------------------
+                # Extract generated files
+                # --------------------------------------------------
 
                 with zipfile.ZipFile(
                     io.BytesIO(zip_bytes),
@@ -402,10 +682,6 @@ if dataset_type in [
                     files_in_zip = (
                         zip_file.namelist()
                     )
-
-                    # ------------------------------
-                    # X_train
-                    # ------------------------------
 
                     if "X_train.csv" in files_in_zip:
 
@@ -419,10 +695,6 @@ if dataset_type in [
 
                         st.session_state.x_train_bytes = None
 
-                    # ------------------------------
-                    # X_test
-                    # ------------------------------
-
                     if "X_test.csv" in files_in_zip:
 
                         st.session_state.x_test_bytes = (
@@ -434,10 +706,6 @@ if dataset_type in [
                     else:
 
                         st.session_state.x_test_bytes = None
-
-                    # ------------------------------
-                    # Pipeline info
-                    # ------------------------------
 
                     if "pipeline_info.txt" in files_in_zip:
 
@@ -451,9 +719,17 @@ if dataset_type in [
 
                         st.session_state.pipeline_info_bytes = None
 
-                # ------------------------------------------
-                # Save state
-                # ------------------------------------------
+                    if "eda_report.html" in files_in_zip:
+
+                        st.session_state.eda_report_bytes = (
+                            zip_file.read(
+                                "eda_report.html"
+                            )
+                        )
+
+                    else:
+
+                        st.session_state.eda_report_bytes = None
 
                 st.session_state.processed = True
 
@@ -541,7 +817,7 @@ if (
         st.stop()
 
     # ------------------------------------------------------
-    # Training dataset information
+    # Dataset information
     # ------------------------------------------------------
 
     st.success(
@@ -549,10 +825,6 @@ if (
         f"{train_df.shape[0]} rows × "
         f"{train_df.shape[1]} columns"
     )
-
-    # ------------------------------------------------------
-    # Test dataset information
-    # ------------------------------------------------------
 
     st.success(
         f"Test dataset loaded — "
@@ -586,7 +858,7 @@ if (
         )
 
     # ------------------------------------------------------
-    # Target selection
+    # Target
     # ------------------------------------------------------
 
     st.subheader("🎯 Target Selection")
@@ -604,6 +876,39 @@ if (
     )
 
     # ======================================================
+    # EDA
+    # ======================================================
+
+    st.divider()
+
+    st.subheader("📊 Exploratory Data Analysis")
+
+    st.write(
+        "EDA is performed on the training dataset because "
+        "it contains the target and is used to learn the "
+        "preprocessing pipeline."
+    )
+
+    eda_features = select_eda_features(
+        train_df,
+        target_column
+    )
+
+    if eda_features:
+
+        for feature in eda_features:
+
+            with st.expander(
+                f"🔎 Analyze: {feature}",
+                expanded=False
+            ):
+
+                render_feature_analysis(
+                    train_df,
+                    feature
+                )
+
+    # ======================================================
     # PROCESS BUTTON
     # ======================================================
 
@@ -614,22 +919,14 @@ if (
     ):
 
         with st.spinner(
-            "Fitting preprocessing on training data "
-            "and transforming test data..."
+            "Running EDA and fitting preprocessing on "
+            "training data, then transforming test data..."
         ):
 
             try:
 
-                # ------------------------------------------
-                # Reset pointers
-                # ------------------------------------------
-
                 train_file.seek(0)
                 test_file.seek(0)
-
-                # ------------------------------------------
-                # Send request
-                # ------------------------------------------
 
                 response = requests.post(
                     API_URL,
@@ -651,10 +948,6 @@ if (
                     },
                     timeout=300
                 )
-
-                # ------------------------------------------
-                # Handle API error
-                # ------------------------------------------
 
                 if response.status_code != 200:
 
@@ -679,9 +972,9 @@ if (
 
                     st.stop()
 
-                # ------------------------------------------
+                # --------------------------------------------------
                 # Store ZIP
-                # ------------------------------------------
+                # --------------------------------------------------
 
                 zip_bytes = response.content
 
@@ -689,9 +982,9 @@ if (
                     zip_bytes
                 )
 
-                # ------------------------------------------
+                # --------------------------------------------------
                 # Extract files
-                # ------------------------------------------
+                # --------------------------------------------------
 
                 with zipfile.ZipFile(
                     io.BytesIO(zip_bytes),
@@ -701,10 +994,6 @@ if (
                     files_in_zip = (
                         zip_file.namelist()
                     )
-
-                    # ------------------------------
-                    # X_train
-                    # ------------------------------
 
                     if "X_train.csv" in files_in_zip:
 
@@ -718,10 +1007,6 @@ if (
 
                         st.session_state.x_train_bytes = None
 
-                    # ------------------------------
-                    # X_test
-                    # ------------------------------
-
                     if "X_test.csv" in files_in_zip:
 
                         st.session_state.x_test_bytes = (
@@ -733,10 +1018,6 @@ if (
                     else:
 
                         st.session_state.x_test_bytes = None
-
-                    # ------------------------------
-                    # Pipeline info
-                    # ------------------------------
 
                     if "pipeline_info.txt" in files_in_zip:
 
@@ -750,9 +1031,17 @@ if (
 
                         st.session_state.pipeline_info_bytes = None
 
-                # ------------------------------------------
-                # Save state
-                # ------------------------------------------
+                    if "eda_report.html" in files_in_zip:
+
+                        st.session_state.eda_report_bytes = (
+                            zip_file.read(
+                                "eda_report.html"
+                            )
+                        )
+
+                    else:
+
+                        st.session_state.eda_report_bytes = None
 
                 st.session_state.processed = True
 
@@ -778,8 +1067,8 @@ if (
 
                 st.error(
                     "The request timed out. "
-                    "The backend may be waking up or "
-                    "the dataset may be too large."
+                    "The dataset may be too large or "
+                    "the backend may be waking up."
                 )
 
             except Exception as e:
@@ -809,7 +1098,22 @@ if (
     )
 
     # ======================================================
-    # DOWNLOAD BUTTONS
+    # EDA REPORT
+    # ======================================================
+
+    if st.session_state.eda_report_bytes is not None:
+
+        st.download_button(
+            label="📊 Download Full EDA Report (HTML)",
+            data=st.session_state.eda_report_bytes,
+            file_name="eda_report.html",
+            mime="text/html",
+            use_container_width=True,
+            key="download_eda_report"
+        )
+
+    # ======================================================
+    # OTHER DOWNLOADS
     # ======================================================
 
     download_items = []
@@ -844,10 +1148,6 @@ if (
             )
         )
 
-    # ------------------------------------------------------
-    # Individual buttons
-    # ------------------------------------------------------
-
     if download_items:
 
         columns = st.columns(
@@ -880,9 +1180,9 @@ if (
                     key=f"download_{filename}"
                 )
 
-    # ------------------------------------------------------
-    # ZIP download
-    # ------------------------------------------------------
+    # ======================================================
+    # ZIP DOWNLOAD
+    # ======================================================
 
     st.download_button(
         label="📦 Download All Files (ZIP)",
@@ -893,9 +1193,9 @@ if (
         key="download_all_files"
     )
 
-    # ------------------------------------------------------
-    # Processing information
-    # ------------------------------------------------------
+    # ======================================================
+    # PROCESSING INFORMATION
+    # ======================================================
 
     if st.session_state.processed_target:
 
@@ -909,13 +1209,11 @@ if (
 # OUTPUT PREVIEW
 # ==========================================================
 
-if (
-    st.session_state.processed
-):
+if st.session_state.processed:
 
-    # ------------------------------------------------------
+    # ======================================================
     # X TRAIN PREVIEW
-    # ------------------------------------------------------
+    # ======================================================
 
     if st.session_state.x_train_bytes is not None:
 
@@ -932,10 +1230,6 @@ if (
             st.subheader(
                 "🔍 Processed Dataset Preview"
             )
-
-            # ----------------------------------------------
-            # Statistics
-            # ----------------------------------------------
 
             col1, col2, col3, col4 = st.columns(4)
 
@@ -986,10 +1280,6 @@ if (
                         .sum()
                     )
                 )
-
-            # ----------------------------------------------
-            # Training preview
-            # ----------------------------------------------
 
             st.write(
                 "First 20 rows of the processed "
