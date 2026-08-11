@@ -431,3 +431,84 @@ if (
             f"Processed target: "
             f"**{st.session_state.processed_target}**"
         )
+        
+        # ==========================================================
+# OUTPUT PREVIEW
+# ==========================================================
+
+st.divider()
+
+st.subheader("🔍 Processed Dataset Preview")
+
+# Convert processed CSV bytes back into DataFrames
+x_train_preview = pd.read_csv(
+    io.BytesIO(
+        st.session_state.x_train_bytes
+    )
+)
+
+x_test_preview = pd.read_csv(
+    io.BytesIO(
+        st.session_state.x_test_bytes
+    )
+)
+
+# ----------------------------------------------------------
+# Output statistics
+# ----------------------------------------------------------
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric(
+        "Training Rows",
+        x_train_preview.shape[0]
+    )
+
+with col2:
+    st.metric(
+        "Test Rows",
+        x_test_preview.shape[0]
+    )
+
+with col3:
+    st.metric(
+        "Output Features",
+        x_train_preview.shape[1]
+    )
+
+with col4:
+    st.metric(
+        "Missing Values",
+        int(x_train_preview.isnull().sum().sum())
+    )
+
+# ----------------------------------------------------------
+# Tabs for train and test
+# ----------------------------------------------------------
+
+train_tab, test_tab = st.tabs(
+    ["X_train.csv", "X_test.csv"]
+)
+
+with train_tab:
+
+    st.write(
+        "First 20 rows of the processed training dataset:"
+    )
+
+    st.dataframe(
+        x_train_preview.head(20),
+        use_container_width=True
+    )
+
+with test_tab:
+
+    st.write(
+        "First 20 rows of the processed test dataset:"
+    )
+
+    st.dataframe(
+        x_test_preview.head(20),
+        use_container_width=True
+    )
