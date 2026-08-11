@@ -1819,6 +1819,17 @@ else:
     # ENTIRE DATASET
     # ======================================================
 
+    # Always initialize both upload variables so the selected
+    # workflow can safely build the API request below.
+    unsupervised_file = None
+    unsupervised_train_file = None
+    unsupervised_test_file = None
+
+
+    # ======================================================
+    # ENTIRE DATASET
+    # ======================================================
+
     if (
         unsupervised_dataset_type
         == "Entire Dataset"
@@ -1848,9 +1859,9 @@ else:
     ):
 
         st.info(
-            "Upload your training dataset. This option is "
-            "available for workflows where the dataset has "
-            "already been split."
+            "Upload your training dataset. The pipeline will "
+            "fit the unsupervised preprocessing on this dataset "
+            "without performing another train/test split."
         )
 
         unsupervised_file = st.file_uploader(
@@ -1867,16 +1878,28 @@ else:
     else:
 
         st.info(
-            "Upload your test dataset. This option is "
-            "available for workflows where the dataset has "
-            "already been split."
+            "Upload both your training and test datasets. "
+            "The preprocessing pipeline will be fitted only "
+            "on the training dataset and then applied to the "
+            "test dataset."
         )
 
-        unsupervised_file = st.file_uploader(
+        unsupervised_train_file = st.file_uploader(
+            "📁 Upload your training dataset",
+            type=["csv"],
+            key="unsupervised_test_workflow_train_upload"
+        )
+
+        unsupervised_test_file = st.file_uploader(
             "📁 Upload your test dataset",
             type=["csv"],
-            key="unsupervised_test_dataset_upload"
+            key="unsupervised_test_workflow_test_upload"
         )
+
+        # Use the training dataset as the dataset displayed in
+        # the existing EDA section. The test dataset is still
+        # separately uploaded and sent to the backend.
+        unsupervised_file = unsupervised_train_file
 
 
     if unsupervised_file is not None:
@@ -1913,6 +1936,38 @@ else:
             unsupervised_df.head(20),
             use_container_width=True
         )
+
+        if (
+            unsupervised_dataset_type
+            == "Test Dataset"
+            and
+            unsupervised_test_file is not None
+        ):
+
+            try:
+
+                unsupervised_test_file.seek(0)
+
+                unsupervised_test_df = pd.read_csv(
+                    unsupervised_test_file
+                )
+
+                st.subheader(
+                    "👀 Test Dataset Preview"
+                )
+
+                st.dataframe(
+                    unsupervised_test_df.head(20),
+                    use_container_width=True
+                )
+
+            except Exception as e:
+
+                st.error(
+                    f"Could not read test dataset: {str(e)}"
+                )
+
+                st.stop()
 
 
         numerical_features = [
@@ -2095,18 +2150,67 @@ else:
                     "Running unsupervised preprocessing..."
                 ):
 
-                    unsupervised_file.seek(0)
+                    # Build the multipart request according to the
+                    # selected unsupervised workflow.
+                    if (
+                        unsupervised_dataset_type
+                        == "Test Dataset"
+                    ):
 
-                    response = requests.post(
-                        API_URL,
+                        if (
+                            unsupervised_train_file is None
+                            or
+                            unsupervised_test_file is None
+                        ):
 
-                        files={
+                            st.error(
+                                "Please upload both the training "
+                                "and test datasets."
+                            )
+
+                            st.stop()
+
+                        unsupervised_train_file.seek(0)
+                        unsupervised_test_file.seek(0)
+
+                        request_files = {
+                            "train_file": (
+                                unsupervised_train_file.name,
+                                unsupervised_train_file,
+                                "text/csv"
+                            ),
+
+                            "test_file": (
+                                unsupervised_test_file.name,
+                                unsupervised_test_file,
+                                "text/csv"
+                            )
+                        }
+
+                    else:
+
+                        if unsupervised_file is None:
+
+                            st.error(
+                                "Please upload a dataset first."
+                            )
+
+                            st.stop()
+
+                        unsupervised_file.seek(0)
+
+                        request_files = {
                             "file": (
                                 unsupervised_file.name,
                                 unsupervised_file,
                                 "text/csv"
                             )
-                        },
+                        }
+
+                    response = requests.post(
+                        API_URL,
+
+                        files=request_files,
 
                         data={
                             "ml_task":
