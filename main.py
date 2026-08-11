@@ -4,6 +4,10 @@ from fastapi.responses import StreamingResponse
 import pandas as pd
 import io
 import zipfile
+import tempfile
+import os
+
+import sweetviz as sv
 
 from sklearn.model_selection import train_test_split
 
@@ -12,7 +16,7 @@ from pipeline import DataPreprocessor
 
 app = FastAPI(
     title="Auto Data Preprocessing API",
-    description="Automated feature engineering and feature selection",
+    description="Automated EDA, feature engineering and feature selection",
     version="1.0"
 )
 
@@ -28,6 +32,98 @@ def root():
         "message": "Auto Data Preprocessing API is running",
         "status": "OK"
     }
+
+
+# ==========================================================
+# SWEETVIZ EDA REPORT
+# ==========================================================
+
+def create_eda_report(df, target):
+
+    try:
+
+        # --------------------------------------------------
+        # Create temporary HTML file
+        # --------------------------------------------------
+
+        temp_file = tempfile.NamedTemporaryFile(
+            suffix=".html",
+            delete=False
+        )
+
+        temp_path = temp_file.name
+
+        temp_file.close()
+
+        # --------------------------------------------------
+        # Generate Sweetviz report
+        # --------------------------------------------------
+
+        if target in df.columns:
+
+            report = sv.analyze(
+                df,
+                target_feat=target
+            )
+
+        else:
+
+            report = sv.analyze(
+                df
+            )
+
+        report.show_html(
+            filepath=temp_path,
+            open_browser=False,
+            layout="widescreen"
+        )
+
+        # --------------------------------------------------
+        # Read generated HTML
+        # --------------------------------------------------
+
+        with open(
+            temp_path,
+            "rb"
+        ) as html_file:
+
+            report_bytes = html_file.read()
+
+        # --------------------------------------------------
+        # Delete temporary file
+        # --------------------------------------------------
+
+        os.remove(
+            temp_path
+        )
+
+        return report_bytes
+
+    except Exception as e:
+
+        # --------------------------------------------------
+        # Clean temporary file if something failed
+        # --------------------------------------------------
+
+        try:
+
+            if os.path.exists(temp_path):
+
+                os.remove(
+                    temp_path
+                )
+
+        except Exception:
+
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"EDA report generation failed: "
+                f"{str(e)}"
+            )
+        )
 
 
 # ==========================================================
@@ -438,6 +534,15 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
+        # Generate EDA from RAW dataset
+        # --------------------------------------------------
+
+        eda_report_bytes = create_eda_report(
+            df,
+            target
+        )
+
+        # --------------------------------------------------
         # Separate X and y
         # --------------------------------------------------
 
@@ -637,6 +742,11 @@ async def process_dataset(
                 info_text
             )
 
+            zip_file.writestr(
+                "eda_report.html",
+                eda_report_bytes
+            )
+
         zip_buffer.seek(0)
 
         return StreamingResponse(
@@ -673,6 +783,15 @@ async def process_dataset(
                     f"not found in training dataset."
                 )
             )
+
+        # --------------------------------------------------
+        # Generate EDA from RAW training dataset
+        # --------------------------------------------------
+
+        eda_report_bytes = create_eda_report(
+            df,
+            target
+        )
 
         # --------------------------------------------------
         # Separate X and y
@@ -796,6 +915,11 @@ async def process_dataset(
                 info_text
             )
 
+            zip_file.writestr(
+                "eda_report.html",
+                eda_report_bytes
+            )
+
         zip_buffer.seek(0)
 
         return StreamingResponse(
@@ -866,6 +990,19 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
+        # Generate EDA from TRAINING dataset
+        #
+        # The test dataset normally does not contain the
+        # target, so the training dataset is used as the
+        # primary EDA source.
+        # --------------------------------------------------
+
+        eda_report_bytes = create_eda_report(
+            train_df,
+            target
+        )
+
+        # --------------------------------------------------
         # Target should NOT be required in TEST
         # --------------------------------------------------
 
@@ -881,8 +1018,9 @@ async def process_dataset(
 
         X_test = test_df.copy()
 
-        # If the test dataset happens to contain the target,
+        # If test happens to contain target,
         # remove it before transformation.
+
         if target in X_test.columns:
 
             X_test = X_test.drop(
@@ -997,6 +1135,11 @@ async def process_dataset(
             zip_file.writestr(
                 "pipeline_info.txt",
                 info_text
+            )
+
+            zip_file.writestr(
+                "eda_report.html",
+                eda_report_bytes
             )
 
         zip_buffer.seek(0)
