@@ -1,23 +1,40 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File,
+    Form,
+    HTTPException
+)
+
+from fastapi.responses import (
+    StreamingResponse
+)
 
 import pandas as pd
 import io
 import zipfile
 
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import (
+    train_test_split
+)
 
-from pipeline import DataPreprocessor
+from pipeline import (
+    DataPreprocessor
+)
 
 
 # ==========================================================
-# APP CONFIGURATION
+# APP
 # ==========================================================
 
 app = FastAPI(
     title="Auto Data Preprocessing API",
-    description="Automated feature engineering and feature selection",
-    version="1.1"
+    description=(
+        "Automated EDA-ready preprocessing, "
+        "feature engineering and feature selection "
+        "for supervised and unsupervised learning."
+    ),
+    version="2.0"
 )
 
 
@@ -29,69 +46,99 @@ app = FastAPI(
 def root():
 
     return {
-        "message": "Auto Data Preprocessing API is running",
-        "status": "OK"
+        "message":
+            "Auto Data Preprocessing API is running",
+
+        "status":
+            "OK",
+
+        "version":
+            "2.0"
     }
 
 
 # ==========================================================
-# PIPELINE INFORMATION FORMATTER
+# PIPELINE REPORT
 # ==========================================================
 
 def create_pipeline_report(info):
 
     report = []
 
-    report.append("=" * 70)
+    report.append(
+        "=" * 70
+    )
+
     report.append(
         "        AUTO DATA PREPROCESSING - PIPELINE REPORT"
     )
-    report.append("=" * 70)
-
-    # ------------------------------------------------------
-    # General Information
-    # ------------------------------------------------------
-
-    report.append("")
-    report.append("GENERAL INFORMATION")
-    report.append("-" * 70)
 
     report.append(
-        f"Dataset Type       : "
+        "=" * 70
+    )
+
+    # ======================================================
+    # GENERAL INFORMATION
+    # ======================================================
+
+    report.append("")
+
+    report.append(
+        "GENERAL INFORMATION"
+    )
+
+    report.append(
+        "-" * 70
+    )
+
+    report.append(
+        f"Dataset Type            : "
         f"{info.get('dataset_type', 'Unknown')}"
     )
 
     report.append(
-        f"Task               : "
+        f"Task                    : "
         f"{str(info.get('task', 'Unknown')).title()}"
     )
 
     report.append(
-        f"Target Column      : "
-        f"{info.get('target', 'Unknown')}"
+        f"Target Column           : "
+        f"{info.get('target', 'None')}"
     )
 
     report.append(
-        f"Rows Processed     : "
+        f"Rows Processed          : "
         f"{info.get('rows_processed', 'Unknown')}"
     )
 
-    # ------------------------------------------------------
-    # Feature Summary
-    # ------------------------------------------------------
+    # ======================================================
+    # FEATURE SUMMARY
+    # ======================================================
 
     report.append("")
-    report.append("FEATURE SUMMARY")
-    report.append("-" * 70)
+
+    report.append(
+        "FEATURE SUMMARY"
+    )
+
+    report.append(
+        "-" * 70
+    )
 
     original_features = info.get(
         "original_feature_count",
-        "Unknown"
+        0
     )
 
     selected_features_count = info.get(
         "selected_feature_count",
-        "Unknown"
+        0
+    )
+
+    removed_features = (
+        original_features
+        -
+        selected_features_count
     )
 
     report.append(
@@ -104,24 +151,24 @@ def create_pipeline_report(info):
         f"{selected_features_count}"
     )
 
-    if (
-        isinstance(original_features, int)
-        and
-        isinstance(selected_features_count, int)
-    ):
+    report.append(
+        f"Features Removed          : "
+        f"{removed_features}"
+    )
 
-        report.append(
-            f"Features Removed          : "
-            f"{original_features - selected_features_count}"
-        )
-
-    # ------------------------------------------------------
-    # ID Columns
-    # ------------------------------------------------------
+    # ======================================================
+    # ID COLUMNS
+    # ======================================================
 
     report.append("")
-    report.append("IDENTIFIER COLUMNS")
-    report.append("-" * 70)
+
+    report.append(
+        "IDENTIFIER COLUMNS"
+    )
+
+    report.append(
+        "-" * 70
+    )
 
     id_columns = info.get(
         "id_columns",
@@ -142,13 +189,19 @@ def create_pipeline_report(info):
             "  None detected."
         )
 
-    # ------------------------------------------------------
-    # Missing Values
-    # ------------------------------------------------------
+    # ======================================================
+    # MISSING VALUES
+    # ======================================================
 
     report.append("")
-    report.append("MISSING VALUE HANDLING")
-    report.append("-" * 70)
+
+    report.append(
+        "MISSING VALUE HANDLING"
+    )
+
+    report.append(
+        "-" * 70
+    )
 
     missing_features = info.get(
         "missing_value_features",
@@ -165,52 +218,60 @@ def create_pipeline_report(info):
         []
     )
 
-    if missing_features:
+    if not missing_features:
 
         report.append(
-            f"Features with missing values : "
+            "  No missing values detected."
+        )
+
+    else:
+
+        report.append(
+            f"  Total features with missing values : "
             f"{len(missing_features)}"
         )
 
+        report.append("")
+
         if numeric_missing:
 
-            report.append("")
             report.append(
-                "Numerical Features:"
+                "  Numerical features:"
             )
 
             for column in numeric_missing:
 
                 report.append(
-                    f"  • {column}"
+                    f"    • {column}"
                 )
 
         if categorical_missing:
 
             report.append("")
+
             report.append(
-                "Categorical Features:"
+                "  Categorical features:"
             )
 
             for column in categorical_missing:
 
                 report.append(
-                    f"  • {column}"
+                    f"    • {column}"
                 )
 
-    else:
-
-        report.append(
-            "No missing values detected."
-        )
-
-    # ------------------------------------------------------
-    # Skewness
-    # ------------------------------------------------------
+    # ======================================================
+    # SKEWNESS
+    # ======================================================
 
     report.append("")
-    report.append("SKEWNESS HANDLING")
-    report.append("-" * 70)
+
+    report.append(
+        "SKEWNESS HANDLING"
+    )
+
+    report.append(
+        "-" * 70
+    )
 
     skewed_features = info.get(
         "skewed_features",
@@ -220,7 +281,7 @@ def create_pipeline_report(info):
     if skewed_features:
 
         report.append(
-            f"Features transformed : "
+            f"  Features transformed : "
             f"{len(skewed_features)}"
         )
 
@@ -229,51 +290,65 @@ def create_pipeline_report(info):
         for column in skewed_features:
 
             report.append(
-                f"  • {column}"
+                f"    • {column}"
             )
 
     else:
 
         report.append(
-            "No significantly skewed features detected."
+            "  No significantly skewed features detected."
         )
 
-    # ------------------------------------------------------
-    # Scaling
-    # ------------------------------------------------------
+    # ======================================================
+    # SCALING
+    # ======================================================
 
     report.append("")
-    report.append("FEATURE SCALING")
-    report.append("-" * 70)
+
+    report.append(
+        "FEATURE SCALING"
+    )
+
+    report.append(
+        "-" * 70
+    )
 
     scaled_features = info.get(
         "scaled_features",
         []
     )
 
-    if scaled_features:
+    report.append(
+        f"  Features scaled : "
+        f"{len(scaled_features)}"
+    )
 
-        report.append(
-            f"Features scaled : "
-            f"{len(scaled_features)}"
-        )
-
-    else:
-
-        report.append(
-            "No features were scaled."
-        )
-
-    # ------------------------------------------------------
-    # Feature Selection
-    # ------------------------------------------------------
+    # ======================================================
+    # FEATURE SELECTION
+    # ======================================================
 
     report.append("")
-    report.append("FEATURE SELECTION")
-    report.append("-" * 70)
 
     report.append(
-        "Method : L1-based feature selection"
+        "FEATURE SELECTION"
+    )
+
+    report.append(
+        "-" * 70
+    )
+
+    method = info.get(
+        "feature_selection_method",
+        "Unknown"
+    )
+
+    report.append(
+        f"  Method : {method}"
+    )
+
+    report.append(
+        f"  Features retained : "
+        f"{selected_features_count}"
     )
 
     selected_features = info.get(
@@ -281,16 +356,12 @@ def create_pipeline_report(info):
         []
     )
 
+    report.append("")
+
     if selected_features:
 
         report.append(
-            f"Features retained : "
-            f"{len(selected_features)}"
-        )
-
-        report.append("")
-        report.append(
-            "Selected Features:"
+            "  Selected Features:"
         )
 
         for number, feature in enumerate(
@@ -299,25 +370,32 @@ def create_pipeline_report(info):
         ):
 
             report.append(
-                f"  {number}. {feature}"
+                f"    {number}. {feature}"
             )
 
     else:
 
         report.append(
-            "No selected feature list available."
+            "  No features selected."
         )
 
-    # ------------------------------------------------------
-    # End
-    # ------------------------------------------------------
+    # ======================================================
+    # END
+    # ======================================================
 
     report.append("")
-    report.append("=" * 70)
+
+    report.append(
+        "=" * 70
+    )
+
     report.append(
         "              END OF PIPELINE REPORT"
     )
-    report.append("=" * 70)
+
+    report.append(
+        "=" * 70
+    )
 
     return "\n".join(report)
 
@@ -335,14 +413,20 @@ async def read_csv_file(
 
         raise HTTPException(
             status_code=400,
-            detail=f"{description} was not uploaded."
+            detail=(
+                f"{description} was not uploaded."
+            )
         )
 
-    if not file.filename.lower().endswith(".csv"):
+    if not file.filename.lower().endswith(
+        ".csv"
+    ):
 
         raise HTTPException(
             status_code=400,
-            detail=f"{description} must be a CSV file."
+            detail=(
+                f"{description} must be a CSV file."
+            )
         )
 
     try:
@@ -353,7 +437,9 @@ async def read_csv_file(
 
             raise HTTPException(
                 status_code=400,
-                detail=f"{description} is empty."
+                detail=(
+                    f"{description} is empty."
+                )
             )
 
         df = pd.read_csv(
@@ -364,7 +450,9 @@ async def read_csv_file(
 
             raise HTTPException(
                 status_code=400,
-                detail=f"{description} contains no data."
+                detail=(
+                    f"{description} contains no data."
+                )
             )
 
         return df
@@ -378,10 +466,54 @@ async def read_csv_file(
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Could not read {description}: "
-                f"{str(e)}"
+                f"Could not read "
+                f"{description}: {str(e)}"
             )
         )
+
+
+# ==========================================================
+# ADD IDS
+# ==========================================================
+
+def add_ids(
+    processed_df,
+    original_df,
+    id_columns
+):
+
+    if not id_columns:
+
+        return processed_df
+
+    ids = pd.DataFrame(
+        index=original_df.index
+    )
+
+    for column in id_columns:
+
+        if column in original_df.columns:
+
+            ids[column] = (
+                original_df[column]
+            )
+
+    if ids.empty:
+
+        return processed_df
+
+    return pd.concat(
+        [
+            ids.reset_index(
+                drop=True
+            ),
+
+            processed_df.reset_index(
+                drop=True
+            )
+        ],
+        axis=1
+    )
 
 
 # ==========================================================
@@ -391,18 +523,182 @@ async def read_csv_file(
 @app.post("/process")
 async def process_dataset(
 
-    dataset_type: str = Form(...),
+    ml_task: str = Form(
+        "Supervised Learning"
+    ),
 
-    target: str = Form(...),
+    dataset_type: str = Form(
+        "Entire Dataset"
+    ),
 
-    # Used for Entire Dataset / Training Dataset
-    file: UploadFile = File(None),
+    target: str = Form(
+        None
+    ),
 
-    # Used for Test Dataset
-    train_file: UploadFile = File(None),
+    # Entire / Training / Unsupervised
+    file: UploadFile = File(
+        None
+    ),
 
-    test_file: UploadFile = File(None)
+    # Test workflow
+    train_file: UploadFile = File(
+        None
+    ),
+
+    test_file: UploadFile = File(
+        None
+    )
 ):
+
+    # ======================================================
+    # VALIDATE ML TASK
+    # ======================================================
+
+    valid_ml_tasks = [
+        "Supervised Learning",
+        "Unsupervised Learning"
+    ]
+
+    if ml_task not in valid_ml_tasks:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid ML task. Choose "
+                "Supervised Learning or "
+                "Unsupervised Learning."
+            )
+        )
+
+    # ======================================================
+    # UNSUPERVISED
+    # ======================================================
+
+    if ml_task == "Unsupervised Learning":
+
+        if file is None:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "A dataset is required "
+                    "for unsupervised learning."
+                )
+            )
+
+        df = await read_csv_file(
+            file,
+            "Dataset"
+        )
+
+        if df.empty:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Dataset contains no rows."
+            )
+
+        # --------------------------------------------------
+        # Create target-free processor
+        # --------------------------------------------------
+
+        processor = DataPreprocessor(
+            target_col=None,
+            task="unsupervised"
+        )
+
+        # --------------------------------------------------
+        # Fit + transform
+        # --------------------------------------------------
+
+        try:
+
+            X_processed = (
+                processor
+                .fit_transform_unsupervised(
+                    df
+                )
+            )
+
+        except Exception as e:
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Unsupervised preprocessing "
+                    f"failed: {str(e)}"
+                )
+            )
+
+        # --------------------------------------------------
+        # Add IDs back
+        # --------------------------------------------------
+
+        output = add_ids(
+            X_processed,
+            df,
+            processor.id_cols
+        )
+
+        # --------------------------------------------------
+        # Pipeline information
+        # --------------------------------------------------
+
+        info = processor.get_info()
+
+        info["dataset_type"] = (
+            "Unsupervised Dataset"
+        )
+
+        info["rows_processed"] = len(df)
+
+        info_text = create_pipeline_report(
+            info
+        )
+
+        # --------------------------------------------------
+        # ZIP
+        # --------------------------------------------------
+
+        zip_buffer = io.BytesIO()
+
+        with zipfile.ZipFile(
+            zip_buffer,
+            "w",
+            zipfile.ZIP_DEFLATED
+        ) as zip_file:
+
+            zip_file.writestr(
+                "X_processed.csv",
+                output.to_csv(
+                    index=False
+                )
+            )
+
+            zip_file.writestr(
+                "pipeline_info.txt",
+                info_text
+            )
+
+        zip_buffer.seek(0)
+
+        return StreamingResponse(
+
+            zip_buffer,
+
+            media_type="application/zip",
+
+            headers={
+                "Content-Disposition":
+                    "attachment; "
+                    "filename="
+                    "processed_unsupervised_dataset.zip"
+            }
+        )
+
+    # ======================================================
+    # SUPERVISED VALIDATION
+    # ======================================================
 
     valid_dataset_types = [
         "Entire Dataset",
@@ -410,18 +706,24 @@ async def process_dataset(
         "Test Dataset"
     ]
 
-    # ======================================================
-    # VALIDATE DATASET TYPE
-    # ======================================================
-
     if dataset_type not in valid_dataset_types:
 
         raise HTTPException(
             status_code=400,
             detail=(
-                "Invalid dataset type. "
-                "Choose Entire Dataset, "
-                "Training Dataset, or Test Dataset."
+                "Invalid dataset type. Choose "
+                "Entire Dataset, Training Dataset, "
+                "or Test Dataset."
+            )
+        )
+
+    if target is None or target == "":
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A target column is required "
+                "for supervised learning."
             )
         )
 
@@ -436,10 +738,6 @@ async def process_dataset(
             "Dataset"
         )
 
-        # --------------------------------------------------
-        # Validate target
-        # --------------------------------------------------
-
         if target not in df.columns:
 
             raise HTTPException(
@@ -450,34 +748,22 @@ async def process_dataset(
                 )
             )
 
-        # --------------------------------------------------
-        # Separate X and y
-        # --------------------------------------------------
-
         X = df.drop(
             columns=[target]
         )
 
         y = df[target]
 
-        # --------------------------------------------------
-        # Create processor
-        # --------------------------------------------------
-
         processor = DataPreprocessor(
             target_col=target
         )
-
-        # --------------------------------------------------
-        # Detect task
-        # --------------------------------------------------
 
         task = processor._detect_task(
             y
         )
 
         # --------------------------------------------------
-        # Train/Test Split
+        # Split
         # --------------------------------------------------
 
         if task == "classification":
@@ -504,7 +790,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Fit Pipeline ONLY on Training Data
+        # Fit
         # --------------------------------------------------
 
         try:
@@ -521,13 +807,13 @@ async def process_dataset(
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"Pipeline fitting failed: "
+                    "Pipeline fitting failed: "
                     f"{str(e)}"
                 )
             )
 
         # --------------------------------------------------
-        # Transform Test Data
+        # Transform test
         # --------------------------------------------------
 
         try:
@@ -543,13 +829,13 @@ async def process_dataset(
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"Test transformation failed: "
+                    "Test transformation failed: "
                     f"{str(e)}"
                 )
             )
 
         # --------------------------------------------------
-        # Create Training Output
+        # Training output
         # --------------------------------------------------
 
         train_output = (
@@ -560,46 +846,29 @@ async def process_dataset(
             y_train.values
         )
 
-        # --------------------------------------------------
-        # Add IDs back to Training Data
-        # --------------------------------------------------
-
-        train_ids = pd.DataFrame(
-            index=X_train.index
+        train_output = add_ids(
+            train_output,
+            X_train,
+            processor.id_cols
         )
 
-        for col in processor.id_cols:
-
-            if col in X_train.columns:
-
-                train_ids[col] = X_train[col]
-
-        if not train_ids.empty:
-
-            train_output = pd.concat(
-                [
-                    train_ids.reset_index(
-                        drop=True
-                    ),
-                    train_output.reset_index(
-                        drop=True
-                    )
-                ],
-                axis=1
-            )
-
         # --------------------------------------------------
-        # Add IDs back to Test Data
+        # Test output
         # --------------------------------------------------
+
+        test_output = (
+            X_test_processed.copy()
+        )
 
         if not test_ids.empty:
 
-            X_test_processed = pd.concat(
+            test_output = pd.concat(
                 [
                     test_ids.reset_index(
                         drop=True
                     ),
-                    X_test_processed.reset_index(
+
+                    test_output.reset_index(
                         drop=True
                     )
                 ],
@@ -607,12 +876,15 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Pipeline Information
+        # Report
         # --------------------------------------------------
 
         info = processor.get_info()
 
-        info["dataset_type"] = dataset_type
+        info["dataset_type"] = (
+            dataset_type
+        )
+
         info["rows_processed"] = len(df)
 
         info_text = create_pipeline_report(
@@ -620,7 +892,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # Create ZIP
+        # ZIP
         # --------------------------------------------------
 
         zip_buffer = io.BytesIO()
@@ -640,7 +912,7 @@ async def process_dataset(
 
             zip_file.writestr(
                 "X_test.csv",
-                X_test_processed.to_csv(
+                test_output.to_csv(
                     index=False
                 )
             )
@@ -652,22 +924,22 @@ async def process_dataset(
 
         zip_buffer.seek(0)
 
-        # --------------------------------------------------
-        # Return ZIP
-        # --------------------------------------------------
-
         return StreamingResponse(
+
             zip_buffer,
+
             media_type="application/zip",
+
             headers={
                 "Content-Disposition":
                     "attachment; "
-                    "filename=processed_dataset.zip"
+                    "filename="
+                    "processed_dataset.zip"
             }
         )
 
     # ======================================================
-    # TRAINING DATASET ONLY
+    # TRAINING DATASET
     # ======================================================
 
     elif dataset_type == "Training Dataset":
@@ -677,23 +949,15 @@ async def process_dataset(
             "Training Dataset"
         )
 
-        # --------------------------------------------------
-        # Validate target
-        # --------------------------------------------------
-
         if target not in df.columns:
 
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Target column '{target}' "
-                    f"not found in training dataset."
+                    f"not found."
                 )
             )
-
-        # --------------------------------------------------
-        # Separate X and y
-        # --------------------------------------------------
 
         X_train = df.drop(
             columns=[target]
@@ -701,17 +965,9 @@ async def process_dataset(
 
         y_train = df[target]
 
-        # --------------------------------------------------
-        # Create processor
-        # --------------------------------------------------
-
         processor = DataPreprocessor(
             target_col=target
         )
-
-        # --------------------------------------------------
-        # Fit on complete training dataset
-        # --------------------------------------------------
 
         try:
 
@@ -727,14 +983,10 @@ async def process_dataset(
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"Pipeline fitting failed: "
+                    "Pipeline fitting failed: "
                     f"{str(e)}"
                 )
             )
-
-        # --------------------------------------------------
-        # Create output
-        # --------------------------------------------------
 
         train_output = (
             X_train_processed.copy()
@@ -744,50 +996,23 @@ async def process_dataset(
             y_train.values
         )
 
-        # --------------------------------------------------
-        # Add IDs
-        # --------------------------------------------------
-
-        train_ids = pd.DataFrame(
-            index=X_train.index
+        train_output = add_ids(
+            train_output,
+            X_train,
+            processor.id_cols
         )
-
-        for col in processor.id_cols:
-
-            if col in X_train.columns:
-
-                train_ids[col] = X_train[col]
-
-        if not train_ids.empty:
-
-            train_output = pd.concat(
-                [
-                    train_ids.reset_index(
-                        drop=True
-                    ),
-                    train_output.reset_index(
-                        drop=True
-                    )
-                ],
-                axis=1
-            )
-
-        # --------------------------------------------------
-        # Pipeline Information
-        # --------------------------------------------------
 
         info = processor.get_info()
 
-        info["dataset_type"] = dataset_type
+        info["dataset_type"] = (
+            dataset_type
+        )
+
         info["rows_processed"] = len(df)
 
         info_text = create_pipeline_report(
             info
         )
-
-        # --------------------------------------------------
-        # Create ZIP
-        # --------------------------------------------------
 
         zip_buffer = io.BytesIO()
 
@@ -812,12 +1037,16 @@ async def process_dataset(
         zip_buffer.seek(0)
 
         return StreamingResponse(
+
             zip_buffer,
+
             media_type="application/zip",
+
             headers={
                 "Content-Disposition":
                     "attachment; "
-                    "filename=processed_training_dataset.zip"
+                    "filename="
+                    "processed_training_dataset.zip"
             }
         )
 
@@ -826,10 +1055,6 @@ async def process_dataset(
     # ======================================================
 
     else:
-
-        # --------------------------------------------------
-        # Validate files
-        # --------------------------------------------------
 
         if train_file is None:
 
@@ -850,10 +1075,6 @@ async def process_dataset(
                 )
             )
 
-        # --------------------------------------------------
-        # Read Training and Test
-        # --------------------------------------------------
-
         train_df = await read_csv_file(
             train_file,
             "Training Dataset"
@@ -864,23 +1085,15 @@ async def process_dataset(
             "Test Dataset"
         )
 
-        # --------------------------------------------------
-        # Validate target
-        # --------------------------------------------------
-
         if target not in train_df.columns:
 
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Target column '{target}' "
-                    f"not found in training dataset."
+                    "not found in training dataset."
                 )
             )
-
-        # --------------------------------------------------
-        # Separate Training Data
-        # --------------------------------------------------
 
         X_train = train_df.drop(
             columns=[target]
@@ -888,14 +1101,7 @@ async def process_dataset(
 
         y_train = train_df[target]
 
-        # --------------------------------------------------
-        # Test Data
-        # --------------------------------------------------
-
         X_test = test_df.copy()
-
-        # Test datasets may contain the target
-        # or may not.
 
         if target in X_test.columns:
 
@@ -903,16 +1109,16 @@ async def process_dataset(
                 columns=[target]
             )
 
-        # --------------------------------------------------
-        # Create Processor
-        # --------------------------------------------------
-
         processor = DataPreprocessor(
             target_col=target
         )
 
+        task = processor._detect_task(
+            y_train
+        )
+
         # --------------------------------------------------
-        # FIT ONLY ON TRAINING DATA
+        # Fit ONLY on training data
         # --------------------------------------------------
 
         try:
@@ -933,7 +1139,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Transform Test
+        # Transform test
         # --------------------------------------------------
 
         try:
@@ -949,7 +1155,7 @@ async def process_dataset(
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"Test transformation failed: "
+                    "Test transformation failed: "
                     f"{str(e)}"
                 )
             )
@@ -965,6 +1171,7 @@ async def process_dataset(
                     test_ids.reset_index(
                         drop=True
                     ),
+
                     X_test_processed.reset_index(
                         drop=True
                     )
@@ -973,12 +1180,15 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Pipeline Information
+        # Report
         # --------------------------------------------------
 
         info = processor.get_info()
 
-        info["dataset_type"] = dataset_type
+        info["dataset_type"] = (
+            dataset_type
+        )
+
         info["rows_processed"] = len(test_df)
 
         info_text = create_pipeline_report(
@@ -986,7 +1196,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # Create ZIP
+        # ZIP
         # --------------------------------------------------
 
         zip_buffer = io.BytesIO()
@@ -1011,16 +1221,16 @@ async def process_dataset(
 
         zip_buffer.seek(0)
 
-        # --------------------------------------------------
-        # Return ZIP
-        # --------------------------------------------------
-
         return StreamingResponse(
+
             zip_buffer,
+
             media_type="application/zip",
+
             headers={
                 "Content-Disposition":
                     "attachment; "
-                    "filename=processed_test_dataset.zip"
+                    "filename="
+                    "processed_test_dataset.zip"
             }
         )
