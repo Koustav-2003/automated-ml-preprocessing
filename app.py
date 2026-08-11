@@ -151,8 +151,10 @@ if uploaded_file is not None:
     st.subheader("🎯 Target Selection")
 
     target_column = st.selectbox(
-        "Select the target column",
-        options=df.columns
+    "Select Target Column",
+    options=df.columns,
+    index=len(df.columns) - 1,
+    help="By default, the last column is selected as the target."
     )
 
     # ======================================================
