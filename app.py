@@ -1040,7 +1040,7 @@ st.session_state.previous_ml_task = ml_task
 if ml_task == "Supervised Learning":
 
     with st.container(border=True):
-        st.subheader("📂 Supervised Processing")
+        st.subheader("🔬 Supervised Processing")
         st.caption(
             "Select how your supervised dataset is structured."
         )
