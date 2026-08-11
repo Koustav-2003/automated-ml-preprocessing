@@ -7,6 +7,7 @@ import sweetviz as sv
 import tempfile
 import os
 import plotly.express as px
+import textwrap
 
 
 # ==========================================================
@@ -35,214 +36,161 @@ st.set_page_config(
 # ==========================================================
 
 st.markdown(
-    """
-    <style>
+    textwrap.dedent(
+        """
+        <style>
 
-    /* =====================================================
-       GLOBAL
-       ===================================================== */
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+            max-width: 1400px;
+        }
 
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-        max-width: 1400px;
-    }
+        h1, h2, h3 {
+            letter-spacing: -0.5px;
+        }
 
-    h1, h2, h3 {
-        letter-spacing: -0.5px;
-    }
+        /* HERO */
 
+        .hero {
+            padding: 2.2rem 2.5rem;
+            border-radius: 18px;
+            margin-bottom: 2rem;
+            border: 1px solid rgba(128,128,128,0.20);
+            background: linear-gradient(
+                135deg,
+                rgba(70,70,70,0.10),
+                rgba(100,100,100,0.04)
+            );
+        }
 
-    /* =====================================================
-       HERO
-       ===================================================== */
+        .hero-title {
+            font-size: 2.65rem;
+            font-weight: 750;
+            margin-bottom: 0.35rem;
+            line-height: 1.15;
+        }
 
-    .hero {
-        padding: 2.2rem 2.5rem;
-        border-radius: 18px;
-        margin-bottom: 2rem;
-        border: 1px solid rgba(128,128,128,0.20);
-        background: linear-gradient(
-            135deg,
-            rgba(70,70,70,0.10),
-            rgba(100,100,100,0.04)
-        );
-    }
+        .hero-subtitle {
+            font-size: 1.18rem;
+            font-weight: 600;
+            margin-bottom: 0.65rem;
+        }
 
-    .hero-title {
-        font-size: 2.65rem;
-        font-weight: 750;
-        margin-bottom: 0.35rem;
-        line-height: 1.15;
-    }
+        .hero-description {
+            font-size: 1rem;
+            opacity: 0.78;
+            max-width: 850px;
+            line-height: 1.6;
+            margin-bottom: 1.2rem;
+        }
 
-    .hero-title span {
-        font-weight: 800;
-    }
+        .workflow {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            align-items: center;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
 
-    .hero-subtitle {
-        font-size: 1.18rem;
-        font-weight: 600;
-        margin-bottom: 0.65rem;
-    }
+        .workflow-step {
+            padding: 0.45rem 0.8rem;
+            border-radius: 999px;
+            border: 1px solid rgba(128,128,128,0.25);
+            background: rgba(128,128,128,0.08);
+        }
 
-    .hero-description {
-        font-size: 1rem;
-        opacity: 0.78;
-        max-width: 850px;
-        line-height: 1.6;
-        margin-bottom: 1.2rem;
-    }
+        .workflow-arrow {
+            opacity: 0.5;
+        }
 
-    .workflow {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.55rem;
-        align-items: center;
-        font-size: 0.95rem;
-        font-weight: 600;
-    }
+        /* SECTION CARDS */
 
-    .workflow-step {
-        padding: 0.45rem 0.8rem;
-        border-radius: 999px;
-        border: 1px solid rgba(128,128,128,0.25);
-        background: rgba(128,128,128,0.08);
-    }
+        .section-card {
+            padding: 1.25rem 1.5rem;
+            border-radius: 14px;
+            border: 1px solid rgba(128,128,128,0.20);
+            margin-bottom: 1rem;
+        }
 
-    .workflow-arrow {
-        opacity: 0.5;
-    }
+        .section-card-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin-bottom: 0.3rem;
+        }
 
+        .section-card-description {
+            opacity: 0.7;
+            font-size: 0.92rem;
+        }
 
-    /* =====================================================
-       SECTION CARDS
-       ===================================================== */
+        /* DOWNLOAD CARD */
 
-    .section-card {
-        padding: 1.25rem 1.5rem;
-        border-radius: 14px;
-        border: 1px solid rgba(128,128,128,0.20);
-        margin-bottom: 1rem;
-    }
+        .download-card {
+            padding: 1.2rem 1.4rem;
+            border-radius: 14px;
+            border: 1px solid rgba(128,128,128,0.20);
+            margin-bottom: 1rem;
+        }
 
-    .section-card-title {
-        font-size: 1.15rem;
-        font-weight: 700;
-        margin-bottom: 0.3rem;
-    }
+        .download-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
 
-    .section-card-description {
-        opacity: 0.7;
-        font-size: 0.92rem;
-    }
+        .download-description {
+            opacity: 0.7;
+            font-size: 0.9rem;
+        }
 
+        /* FOOTER */
 
-    /* =====================================================
-       STATUS / INFO CARDS
-       ===================================================== */
+        .footer {
+            text-align: center;
+            opacity: 0.5;
+            font-size: 0.85rem;
+            padding-top: 2rem;
+        }
 
-    .status-card {
-        padding: 1rem 1.2rem;
-        border-radius: 12px;
-        border: 1px solid rgba(128,128,128,0.20);
-        margin: 0.5rem 0 1rem 0;
-    }
+        /* BUTTONS */
 
-    .status-title {
-        font-weight: 700;
-        margin-bottom: 0.25rem;
-    }
+        div.stButton > button {
+            border-radius: 10px;
+            font-weight: 650;
+            min-height: 2.7rem;
+        }
 
-    .status-text {
-        opacity: 0.75;
-        font-size: 0.92rem;
-        line-height: 1.5;
-    }
+        div.stDownloadButton > button {
+            border-radius: 10px;
+            font-weight: 600;
+            min-height: 2.6rem;
+        }
 
+        /* FILE UPLOADER */
 
-    /* =====================================================
-       DOWNLOAD AREA
-       ===================================================== */
+        [data-testid="stFileUploader"] {
+            border-radius: 14px;
+        }
 
-    .download-card {
-        padding: 1.2rem 1.4rem;
-        border-radius: 14px;
-        border: 1px solid rgba(128,128,128,0.20);
-        margin-bottom: 1rem;
-    }
+        /* METRICS */
 
-    .download-title {
-        font-size: 1.2rem;
-        font-weight: 700;
-        margin-bottom: 0.25rem;
-    }
+        [data-testid="stMetric"] {
+            padding: 0.8rem;
+            border-radius: 12px;
+            border: 1px solid rgba(128,128,128,0.15);
+        }
 
-    .download-description {
-        opacity: 0.7;
-        font-size: 0.9rem;
-    }
+        /* EXPANDERS */
 
+        [data-testid="stExpander"] {
+            border-radius: 10px;
+        }
 
-    /* =====================================================
-       FOOTER
-       ===================================================== */
-
-    .footer {
-        text-align: center;
-        opacity: 0.5;
-        font-size: 0.85rem;
-        padding-top: 2rem;
-    }
-
-
-    /* =====================================================
-       BUTTONS
-       ===================================================== */
-
-    div.stButton > button {
-        border-radius: 10px;
-        font-weight: 650;
-        min-height: 2.7rem;
-    }
-
-    div.stDownloadButton > button {
-        border-radius: 10px;
-        font-weight: 600;
-        min-height: 2.6rem;
-    }
-
-
-    /* =====================================================
-       FILE UPLOADER
-       ===================================================== */
-
-    [data-testid="stFileUploader"] {
-        border-radius: 14px;
-    }
-
-
-    /* =====================================================
-       METRICS
-       ===================================================== */
-
-    [data-testid="stMetric"] {
-        padding: 0.8rem;
-        border-radius: 12px;
-        border: 1px solid rgba(128,128,128,0.15);
-    }
-
-
-    /* =====================================================
-       EXPANDERS
-       ===================================================== */
-
-    [data-testid="stExpander"] {
-        border-radius: 10px;
-    }
-
-    </style>
-    """,
+        </style>
+        """
+    ),
     unsafe_allow_html=True
 )
 
@@ -270,7 +218,6 @@ defaults = {
 
     "previous_dataset_type": None,
 }
-
 
 for key, value in defaults.items():
 
@@ -303,66 +250,68 @@ def clear_results():
 # ==========================================================
 
 st.markdown(
-    """
-    <div class="hero">
+    textwrap.dedent(
+        """
+        <div class="hero">
 
-        <div class="hero-title">
-            ⚙️ Auto ML Preprocessor
+            <div class="hero-title">
+                ⚙️ Auto ML Preprocessor
+            </div>
+
+            <div class="hero-subtitle">
+                No more manual EDA. No more repetitive preprocessing.
+            </div>
+
+            <div class="hero-description">
+                Upload your dataset and automatically perform
+                exploratory data analysis, preprocessing,
+                feature engineering, scaling and feature selection —
+                all in one workflow.
+            </div>
+
+            <div class="workflow">
+
+                <div class="workflow-step">
+                    📁 Upload
+                </div>
+
+                <div class="workflow-arrow">
+                    →
+                </div>
+
+                <div class="workflow-step">
+                    📊 Analyze
+                </div>
+
+                <div class="workflow-arrow">
+                    →
+                </div>
+
+                <div class="workflow-step">
+                    ⚙️ Process
+                </div>
+
+                <div class="workflow-arrow">
+                    →
+                </div>
+
+                <div class="workflow-step">
+                    ✨ Engineer
+                </div>
+
+                <div class="workflow-arrow">
+                    →
+                </div>
+
+                <div class="workflow-step">
+                    📥 Download
+                </div>
+
+            </div>
+
         </div>
-
-        <div class="hero-subtitle">
-            No more manual EDA. No more repetitive preprocessing.
-        </div>
-
-        <div class="hero-description">
-            Upload your dataset and automatically perform
-            exploratory data analysis, preprocessing,
-            feature engineering, scaling and feature selection —
-            all in one workflow.
-        </div>
-
-        <div class="workflow">
-
-            <div class="workflow-step">
-                📁 Upload
-            </div>
-
-            <div class="workflow-arrow">
-                →
-            </div>
-
-            <div class="workflow-step">
-                📊 Analyze
-            </div>
-
-            <div class="workflow-arrow">
-                →
-            </div>
-
-            <div class="workflow-step">
-                ⚙️ Process
-            </div>
-
-            <div class="workflow-arrow">
-                →
-            </div>
-
-            <div class="workflow-step">
-                ✨ Engineer
-            </div>
-
-            <div class="workflow-arrow">
-                →
-            </div>
-
-            <div class="workflow-step">
-                📥 Download
-            </div>
-
-        </div>
-
-    </div>
-    """,
+        """
+    ),
     unsafe_allow_html=True
 )
 
@@ -375,41 +324,26 @@ def render_numerical_analysis(df, feature):
 
     data = df[feature]
 
-    missing_count = int(
-        data.isnull().sum()
-    )
+    missing_count = int(data.isnull().sum())
 
     missing_percentage = (
         data.isnull().mean() * 100
     )
 
-    unique_count = int(
-        data.nunique()
-    )
-
-    # ------------------------------------------------------
-    # Metrics
-    # ------------------------------------------------------
+    unique_count = int(data.nunique())
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-
-        st.metric(
-            "Type",
-            "Numerical"
-        )
+        st.metric("Type", "Numerical")
 
     with col2:
-
         st.metric(
             "Missing",
-            f"{missing_count} "
-            f"({missing_percentage:.2f}%)"
+            f"{missing_count} ({missing_percentage:.2f}%)"
         )
 
     with col3:
-
         st.metric(
             "Unique Values",
             unique_count
@@ -430,17 +364,11 @@ def render_numerical_analysis(df, feature):
             mean_text
         )
 
-    # ------------------------------------------------------
-    # Statistics
-    # ------------------------------------------------------
-
     col1, col2 = st.columns(2)
 
     with col1:
 
-        st.write(
-            "**Summary Statistics**"
-        )
+        st.write("**Summary Statistics**")
 
         stats = pd.DataFrame({
             "Statistic": [
@@ -467,15 +395,9 @@ def render_numerical_analysis(df, feature):
             use_container_width=True
         )
 
-    # ------------------------------------------------------
-    # Distribution
-    # ------------------------------------------------------
-
     with col2:
 
-        st.write(
-            "**Distribution**"
-        )
+        st.write("**Distribution**")
 
         clean_data = data.dropna()
 
@@ -487,23 +409,13 @@ def render_numerical_analysis(df, feature):
                 .sort_index()
             )
 
-            st.bar_chart(
-                distribution
-            )
+            st.bar_chart(distribution)
 
         else:
 
-            st.info(
-                "No values available."
-            )
+            st.info("No values available.")
 
-    # ------------------------------------------------------
-    # Box Plot
-    # ------------------------------------------------------
-
-    st.write(
-        "**Box Plot**"
-    )
+    st.write("**Box Plot**")
 
     clean_data = data.dropna()
 
@@ -553,37 +465,25 @@ def render_categorical_analysis(df, feature):
         data.nunique()
     )
 
-    # ------------------------------------------------------
-    # Metrics
-    # ------------------------------------------------------
-
     col1, col2, col3 = st.columns(3)
 
     with col1:
-
         st.metric(
             "Type",
             "Categorical"
         )
 
     with col2:
-
         st.metric(
             "Missing",
-            f"{missing_count} "
-            f"({missing_percentage:.2f}%)"
+            f"{missing_count} ({missing_percentage:.2f}%)"
         )
 
     with col3:
-
         st.metric(
             "Unique Values",
             unique_count
         )
-
-    # ------------------------------------------------------
-    # Distribution
-    # ------------------------------------------------------
 
     st.write(
         "**Category Distribution**"
@@ -599,9 +499,7 @@ def render_categorical_analysis(df, feature):
 
     if not value_counts.empty:
 
-        st.bar_chart(
-            value_counts
-        )
+        st.bar_chart(value_counts)
 
         category_table = pd.DataFrame({
             "Category": value_counts.index,
@@ -682,18 +580,14 @@ def render_target_analysis(df, target):
 
         st.metric(
             "Missing",
-            int(
-                target_data.isnull().sum()
-            )
+            int(target_data.isnull().sum())
         )
 
     with col3:
 
         st.metric(
             "Unique Values",
-            int(
-                target_data.nunique()
-            )
+            int(target_data.nunique())
         )
 
     with col4:
@@ -702,10 +596,6 @@ def render_target_analysis(df, target):
             "Rows",
             len(target_data)
         )
-
-    # ======================================================
-    # NUMERICAL TARGET
-    # ======================================================
 
     if target_is_numeric:
 
@@ -748,9 +638,7 @@ def render_target_analysis(df, target):
                 "**Target Distribution**"
             )
 
-            clean_target = (
-                target_data.dropna()
-            )
+            clean_target = target_data.dropna()
 
             if not clean_target.empty:
 
@@ -766,17 +654,11 @@ def render_target_analysis(df, target):
                     "No target values available."
                 )
 
-        # --------------------------------------------------
-        # Target Box Plot
-        # --------------------------------------------------
-
         st.write(
             "**Target Box Plot**"
         )
 
-        clean_target = (
-            target_data.dropna()
-        )
+        clean_target = target_data.dropna()
 
         if not clean_target.empty:
 
@@ -796,10 +678,6 @@ def render_target_analysis(df, target):
                 fig,
                 use_container_width=True
             )
-
-    # ======================================================
-    # CATEGORICAL TARGET
-    # ======================================================
 
     else:
 
@@ -830,9 +708,7 @@ def render_target_analysis(df, target):
             use_container_width=True
         )
 
-        st.bar_chart(
-            class_counts
-        )
+        st.bar_chart(class_counts)
 
 
 # ==========================================================
@@ -884,9 +760,7 @@ def generate_sweetviz_report(df, target):
             "rb"
         ) as html_file:
 
-            report_bytes = (
-                html_file.read()
-            )
+            report_bytes = html_file.read()
 
         return report_bytes
 
@@ -899,13 +773,8 @@ def generate_sweetviz_report(df, target):
         ):
 
             try:
-
-                os.remove(
-                    temp_path
-                )
-
+                os.remove(temp_path)
             except Exception:
-
                 pass
 
 
@@ -943,8 +812,7 @@ def run_sweetviz(df, target):
     except Exception as e:
 
         st.error(
-            f"Sweetviz report generation failed: "
-            f"{str(e)}"
+            f"Sweetviz report generation failed: {str(e)}"
         )
 
     finally:
@@ -969,18 +837,10 @@ def render_full_eda(df, target_column):
         "running the automated preprocessing pipeline."
     )
 
-    # ------------------------------------------------------
-    # Target
-    # ------------------------------------------------------
-
     render_target_analysis(
         df,
         target_column
     )
-
-    # ------------------------------------------------------
-    # Feature Types
-    # ------------------------------------------------------
 
     numerical_features = [
         column
@@ -1000,13 +860,8 @@ def render_full_eda(df, target_column):
         and column != target_column
     ]
 
-    # ======================================================
-    # NUMERICAL FEATURES
-    # ======================================================
-
     with st.expander(
-        f"➕ Numerical Features "
-        f"({len(numerical_features)})",
+        f"➕ Numerical Features ({len(numerical_features)})",
         expanded=False
     ):
 
@@ -1030,13 +885,8 @@ def render_full_eda(df, target_column):
                 "No numerical features available."
             )
 
-    # ======================================================
-    # CATEGORICAL FEATURES
-    # ======================================================
-
     with st.expander(
-        f"➕ Categorical Features "
-        f"({len(categorical_features)})",
+        f"➕ Categorical Features ({len(categorical_features)})",
         expanded=False
     ):
 
@@ -1080,9 +930,7 @@ def render_sweetviz_section(
 
     if description:
 
-        st.write(
-            description
-        )
+        st.write(description)
 
     else:
 
@@ -1124,9 +972,7 @@ def render_sweetviz_section(
     ):
 
         st.download_button(
-            label=(
-                "📄 Download Full EDA Report (HTML)"
-            ),
+            label="📄 Download Full EDA Report (HTML)",
             data=st.session_state.eda_report_bytes,
             file_name="eda_report.html",
             mime="text/html",
@@ -1136,26 +982,33 @@ def render_sweetviz_section(
 
 
 # ==========================================================
-# DATASET TYPE
+# DATASET WORKFLOW CARD
 # ==========================================================
 
 st.markdown(
-    """
-    <div class="section-card">
+    textwrap.dedent(
+        """
+        <div class="section-card">
 
-        <div class="section-card-title">
-            📂 Choose your dataset workflow
+            <div class="section-card-title">
+                📂 Choose your dataset workflow
+            </div>
+
+            <div class="section-card-description">
+                Tell the application how your data is currently
+                structured so it can apply the correct workflow.
+            </div>
+
         </div>
-
-        <div class="section-card-description">
-            Tell the application how your data is currently
-            structured so it can apply the correct workflow.
-        </div>
-
-    </div>
-    """,
+        """
+    ),
     unsafe_allow_html=True
 )
+
+
+# ==========================================================
+# DATASET TYPE
+# ==========================================================
 
 dataset_type = st.radio(
     "Select dataset type:",
@@ -1180,9 +1033,7 @@ if (
 
     clear_results()
 
-st.session_state.previous_dataset_type = (
-    dataset_type
-)
+st.session_state.previous_dataset_type = dataset_type
 
 
 # ==========================================================
@@ -1277,10 +1128,6 @@ if (
     uploaded_file is not None
 ):
 
-    # ------------------------------------------------------
-    # Read CSV
-    # ------------------------------------------------------
-
     try:
 
         uploaded_file.seek(0)
@@ -1297,18 +1144,10 @@ if (
 
         st.stop()
 
-    # ------------------------------------------------------
-    # Loaded status
-    # ------------------------------------------------------
-
     st.success(
         f"Dataset loaded successfully — "
         f"{df.shape[0]:,} rows × {df.shape[1]:,} columns"
     )
-
-    # ------------------------------------------------------
-    # Preview
-    # ------------------------------------------------------
 
     st.subheader(
         "👀 Dataset Preview"
@@ -1322,10 +1161,6 @@ if (
         df.head(20),
         use_container_width=True
     )
-
-    # ------------------------------------------------------
-    # Dataset Overview
-    # ------------------------------------------------------
 
     numerical_features = [
         column
@@ -1346,35 +1181,30 @@ if (
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
-
         st.metric(
             "Rows",
             f"{df.shape[0]:,}"
         )
 
     with col2:
-
         st.metric(
             "Columns",
             f"{df.shape[1]:,}"
         )
 
     with col3:
-
         st.metric(
             "Numerical",
             len(numerical_features)
         )
 
     with col4:
-
         st.metric(
             "Categorical",
             len(categorical_features)
         )
 
     with col5:
-
         st.metric(
             "Missing Values",
             f"{int(df.isnull().sum().sum()):,}"
@@ -1384,10 +1214,6 @@ if (
         f"Duplicate rows: "
         f"**{int(df.duplicated().sum()):,}**"
     )
-
-    # ------------------------------------------------------
-    # Target
-    # ------------------------------------------------------
 
     st.subheader(
         "🎯 Target Selection"
@@ -1409,28 +1235,16 @@ if (
         key="single_dataset_target"
     )
 
-    # ------------------------------------------------------
-    # EDA
-    # ------------------------------------------------------
-
     render_full_eda(
         df,
         target_column
     )
-
-    # ------------------------------------------------------
-    # Sweetviz
-    # ------------------------------------------------------
 
     render_sweetviz_section(
         df,
         target_column,
         "single"
     )
-
-    # ======================================================
-    # PROCESS
-    # ======================================================
 
     st.divider()
 
@@ -1501,33 +1315,24 @@ if (
                         error_detail = response.text
 
                     st.error(
-                        f"Processing failed: "
-                        f"{error_detail}"
+                        f"Processing failed: {error_detail}"
                     )
 
                     st.stop()
 
-                st.session_state.zip_bytes = (
-                    response.content
-                )
+                st.session_state.zip_bytes = response.content
 
                 with zipfile.ZipFile(
-                    io.BytesIO(
-                        response.content
-                    ),
+                    io.BytesIO(response.content),
                     "r"
                 ) as zip_file:
 
-                    files_in_zip = (
-                        zip_file.namelist()
-                    )
+                    files_in_zip = zip_file.namelist()
 
                     if "X_train.csv" in files_in_zip:
 
                         st.session_state.x_train_bytes = (
-                            zip_file.read(
-                                "X_train.csv"
-                            )
+                            zip_file.read("X_train.csv")
                         )
 
                     else:
@@ -1537,9 +1342,7 @@ if (
                     if "X_test.csv" in files_in_zip:
 
                         st.session_state.x_test_bytes = (
-                            zip_file.read(
-                                "X_test.csv"
-                            )
+                            zip_file.read("X_test.csv")
                         )
 
                     else:
@@ -1587,8 +1390,7 @@ if (
         except Exception as e:
 
             st.error(
-                f"An unexpected error occurred: "
-                f"{str(e)}"
+                f"An unexpected error occurred: {str(e)}"
             )
 
         finally:
@@ -1608,10 +1410,6 @@ if (
     test_file is not None
 ):
 
-    # ------------------------------------------------------
-    # Read training
-    # ------------------------------------------------------
-
     try:
 
         train_file.seek(0)
@@ -1627,10 +1425,6 @@ if (
         )
 
         st.stop()
-
-    # ------------------------------------------------------
-    # Read test
-    # ------------------------------------------------------
 
     try:
 
@@ -1648,10 +1442,6 @@ if (
 
         st.stop()
 
-    # ------------------------------------------------------
-    # Status
-    # ------------------------------------------------------
-
     st.success(
         f"Training dataset loaded — "
         f"{train_df.shape[0]:,} rows × "
@@ -1663,10 +1453,6 @@ if (
         f"{test_df.shape[0]:,} rows × "
         f"{test_df.shape[1]:,} columns"
     )
-
-    # ------------------------------------------------------
-    # Preview
-    # ------------------------------------------------------
 
     st.subheader(
         "👀 Dataset Preview"
@@ -1701,10 +1487,6 @@ if (
             use_container_width=True
         )
 
-    # ------------------------------------------------------
-    # Target
-    # ------------------------------------------------------
-
     st.subheader(
         "🎯 Target Selection"
     )
@@ -1724,28 +1506,16 @@ if (
         key="test_dataset_target"
     )
 
-    # ------------------------------------------------------
-    # EDA Information
-    # ------------------------------------------------------
-
     st.info(
         "ℹ️ EDA is performed on the **training dataset only**. "
         "The test dataset is kept unseen because it should not "
         "influence preprocessing or feature-selection decisions."
     )
 
-    # ------------------------------------------------------
-    # EDA
-    # ------------------------------------------------------
-
     render_full_eda(
         train_df,
         target_column
     )
-
-    # ------------------------------------------------------
-    # Sweetviz
-    # ------------------------------------------------------
 
     render_sweetviz_section(
         train_df,
@@ -1759,10 +1529,6 @@ if (
             "training data."
         )
     )
-
-    # ======================================================
-    # PROCESS TEST DATASET
-    # ======================================================
 
     st.divider()
 
@@ -1839,33 +1605,24 @@ if (
                         error_detail = response.text
 
                     st.error(
-                        f"Processing failed: "
-                        f"{error_detail}"
+                        f"Processing failed: {error_detail}"
                     )
 
                     st.stop()
 
-                st.session_state.zip_bytes = (
-                    response.content
-                )
+                st.session_state.zip_bytes = response.content
 
                 with zipfile.ZipFile(
-                    io.BytesIO(
-                        response.content
-                    ),
+                    io.BytesIO(response.content),
                     "r"
                 ) as zip_file:
 
-                    files_in_zip = (
-                        zip_file.namelist()
-                    )
+                    files_in_zip = zip_file.namelist()
 
                     if "X_train.csv" in files_in_zip:
 
                         st.session_state.x_train_bytes = (
-                            zip_file.read(
-                                "X_train.csv"
-                            )
+                            zip_file.read("X_train.csv")
                         )
 
                     else:
@@ -1875,9 +1632,7 @@ if (
                     if "X_test.csv" in files_in_zip:
 
                         st.session_state.x_test_bytes = (
-                            zip_file.read(
-                                "X_test.csv"
-                            )
+                            zip_file.read("X_test.csv")
                         )
 
                     else:
@@ -1925,8 +1680,7 @@ if (
         except Exception as e:
 
             st.error(
-                f"An unexpected error occurred: "
-                f"{str(e)}"
+                f"An unexpected error occurred: {str(e)}"
             )
 
         finally:
@@ -1947,20 +1701,22 @@ if (
     st.divider()
 
     st.markdown(
-        """
-        <div class="download-card">
+        textwrap.dedent(
+            """
+            <div class="download-card">
 
-            <div class="download-title">
-                📥 Your processed data is ready
+                <div class="download-title">
+                    📥 Your processed data is ready
+                </div>
+
+                <div class="download-description">
+                    Download individual outputs below or grab
+                    everything together as a ZIP archive.
+                </div>
+
             </div>
-
-            <div class="download-description">
-                Download individual outputs below or grab
-                everything together as a ZIP archive.
-            </div>
-
-        </div>
-        """,
+            """
+        ),
         unsafe_allow_html=True
     )
 
@@ -2051,10 +1807,6 @@ if (
 
 if st.session_state.processed:
 
-    # ------------------------------------------------------
-    # TRAINING PREVIEW
-    # ------------------------------------------------------
-
     if st.session_state.x_train_bytes is not None:
 
         try:
@@ -2134,10 +1886,6 @@ if st.session_state.processed:
 
             pass
 
-    # ------------------------------------------------------
-    # TEST PREVIEW
-    # ------------------------------------------------------
-
     if st.session_state.x_test_bytes is not None:
 
         try:
@@ -2171,11 +1919,13 @@ if st.session_state.processed:
 # ==========================================================
 
 st.markdown(
-    """
-    <div class="footer">
-        Auto ML Preprocessor · Automated EDA ·
-        Feature Engineering · Feature Selection
-    </div>
-    """,
+    textwrap.dedent(
+        """
+        <div class="footer">
+            Auto ML Preprocessor · Automated EDA ·
+            Feature Engineering · Feature Selection
+        </div>
+        """
+    ),
     unsafe_allow_html=True
 )
