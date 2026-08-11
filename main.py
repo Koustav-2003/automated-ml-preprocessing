@@ -35,19 +35,13 @@ def root():
 # ==========================================================
 
 def create_pipeline_report(info):
-    """
-    Convert pipeline information into a user-friendly
-    human-readable report.
-    """
 
     report = []
 
-    # ------------------------------------------------------
-    # HEADER
-    # ------------------------------------------------------
-
     report.append("=" * 70)
-    report.append("        AUTO DATA PREPROCESSING - PIPELINE REPORT")
+    report.append(
+        "        AUTO DATA PREPROCESSING - PIPELINE REPORT"
+    )
     report.append("=" * 70)
 
     # ------------------------------------------------------
@@ -59,6 +53,11 @@ def create_pipeline_report(info):
     report.append("-" * 70)
 
     report.append(
+        f"Dataset Type            : "
+        f"{info.get('dataset_type', 'Unknown')}"
+    )
+
+    report.append(
         f"Task                    : "
         f"{str(info.get('task', 'Unknown')).title()}"
     )
@@ -66,6 +65,11 @@ def create_pipeline_report(info):
     report.append(
         f"Target Column           : "
         f"{info.get('target', 'Unknown')}"
+    )
+
+    report.append(
+        f"Rows Processed          : "
+        f"{info.get('rows_processed', 'Unknown')}"
     )
 
     # ------------------------------------------------------
@@ -300,10 +304,71 @@ def create_pipeline_report(info):
 
     report.append("")
     report.append("=" * 70)
-    report.append("              END OF PIPELINE REPORT")
+    report.append(
+        "              END OF PIPELINE REPORT"
+    )
     report.append("=" * 70)
 
     return "\n".join(report)
+
+
+# ==========================================================
+# CSV READER
+# ==========================================================
+
+async def read_csv_file(file, description):
+
+    if file is None:
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"{description} was not uploaded."
+        )
+
+    if not file.filename.lower().endswith(".csv"):
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"{description} must be a CSV file."
+        )
+
+    try:
+
+        contents = await file.read()
+
+        if not contents:
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"{description} is empty."
+            )
+
+        df = pd.read_csv(
+            io.BytesIO(contents)
+        )
+
+        if df.empty:
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"{description} contains no data."
+            )
+
+        return df
+
+    except HTTPException:
+
+        raise
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Could not read {description}: "
+                f"{str(e)}"
+            )
+        )
 
 
 # ==========================================================
@@ -312,257 +377,636 @@ def create_pipeline_report(info):
 
 @app.post("/process")
 async def process_dataset(
-    file: UploadFile = File(...),
-    target: str = Form(...)
+
+    dataset_type: str = Form(...),
+
+    target: str = Form(...),
+
+    # Used for Entire Dataset / Training Dataset
+    file: UploadFile = File(None),
+
+    # Used for Test Dataset
+    train_file: UploadFile = File(None),
+
+    test_file: UploadFile = File(None)
 ):
 
-    # ------------------------------------------------------
-    # Validate file
-    # ------------------------------------------------------
+    valid_dataset_types = [
+        "Entire Dataset",
+        "Training Dataset",
+        "Test Dataset"
+    ]
 
-    if not file.filename.lower().endswith(".csv"):
+    # ======================================================
+    # VALIDATE DATASET TYPE
+    # ======================================================
 
-        raise HTTPException(
-            status_code=400,
-            detail="Only CSV files are supported."
-        )
-
-    # ------------------------------------------------------
-    # Read CSV
-    # ------------------------------------------------------
-
-    try:
-
-        contents = await file.read()
-
-        df = pd.read_csv(
-            io.BytesIO(contents)
-        )
-
-    except Exception as e:
+    if dataset_type not in valid_dataset_types:
 
         raise HTTPException(
             status_code=400,
-            detail=f"Could not read CSV: {str(e)}"
-        )
-
-    # ------------------------------------------------------
-    # Validate target
-    # ------------------------------------------------------
-
-    if target not in df.columns:
-
-        raise HTTPException(
-            status_code=400,
-            detail=f"Target column '{target}' not found."
-        )
-
-    # ------------------------------------------------------
-    # Separate X and y
-    # ------------------------------------------------------
-
-    X = df.drop(
-        columns=[target]
-    )
-
-    y = df[target]
-
-    # ------------------------------------------------------
-    # Create processor
-    # ------------------------------------------------------
-
-    processor = DataPreprocessor(
-        target_col=target
-    )
-
-    # ------------------------------------------------------
-    # Detect task
-    # ------------------------------------------------------
-
-    task = processor._detect_task(y)
-
-    # ------------------------------------------------------
-    # Train/test split
-    # ------------------------------------------------------
-
-    if task == "classification":
-
-        X_train, X_test, y_train, y_test = (
-            train_test_split(
-                X,
-                y,
-                test_size=0.2,
-                random_state=42,
-                stratify=y
+            detail=(
+                "Invalid dataset type. "
+                "Choose Entire Dataset, "
+                "Training Dataset, or Test Dataset."
             )
         )
+
+    # ======================================================
+    # ENTIRE DATASET
+    # ======================================================
+
+    if dataset_type == "Entire Dataset":
+
+        df = await read_csv_file(
+            file,
+            "Dataset"
+        )
+
+        # --------------------------------------------------
+        # Validate target
+        # --------------------------------------------------
+
+        if target not in df.columns:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Target column '{target}' "
+                    f"not found."
+                )
+            )
+
+        # --------------------------------------------------
+        # Separate X and y
+        # --------------------------------------------------
+
+        X = df.drop(
+            columns=[target]
+        )
+
+        y = df[target]
+
+        # --------------------------------------------------
+        # Create processor
+        # --------------------------------------------------
+
+        processor = DataPreprocessor(
+            target_col=target
+        )
+
+        # --------------------------------------------------
+        # Detect task
+        # --------------------------------------------------
+
+        task = processor._detect_task(
+            y
+        )
+
+        # --------------------------------------------------
+        # Train/test split
+        # --------------------------------------------------
+
+        if task == "classification":
+
+            X_train, X_test, y_train, y_test = (
+                train_test_split(
+                    X,
+                    y,
+                    test_size=0.2,
+                    random_state=42,
+                    stratify=y
+                )
+            )
+
+        else:
+
+            X_train, X_test, y_train, y_test = (
+                train_test_split(
+                    X,
+                    y,
+                    test_size=0.2,
+                    random_state=42
+                )
+            )
+
+        # --------------------------------------------------
+        # FIT ONLY ON TRAIN
+        # --------------------------------------------------
+
+        try:
+
+            X_train_processed = (
+                processor.fit_transform(
+                    X_train,
+                    y_train
+                )
+            )
+
+        except Exception as e:
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Pipeline fitting failed: "
+                    f"{str(e)}"
+                )
+            )
+
+        # --------------------------------------------------
+        # Transform test
+        # --------------------------------------------------
+
+        try:
+
+            X_test_processed, test_ids = (
+                processor.transform(
+                    X_test
+                )
+            )
+
+        except Exception as e:
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Test transformation failed: "
+                    f"{str(e)}"
+                )
+            )
+
+        # --------------------------------------------------
+        # Create train output
+        # --------------------------------------------------
+
+        train_output = (
+            X_train_processed.copy()
+        )
+
+        train_output[target] = (
+            y_train.values
+        )
+
+        # --------------------------------------------------
+        # Add IDs to train
+        # --------------------------------------------------
+
+        train_ids = pd.DataFrame(
+            index=X_train.index
+        )
+
+        for col in processor.id_cols:
+
+            if col in X_train.columns:
+
+                train_ids[col] = X_train[col]
+
+        if not train_ids.empty:
+
+            train_output = pd.concat(
+                [
+                    train_ids.reset_index(
+                        drop=True
+                    ),
+                    train_output.reset_index(
+                        drop=True
+                    )
+                ],
+                axis=1
+            )
+
+        # --------------------------------------------------
+        # Add IDs to test
+        # --------------------------------------------------
+
+        if not test_ids.empty:
+
+            X_test_processed = pd.concat(
+                [
+                    test_ids.reset_index(
+                        drop=True
+                    ),
+                    X_test_processed.reset_index(
+                        drop=True
+                    )
+                ],
+                axis=1
+            )
+
+        # --------------------------------------------------
+        # Pipeline info
+        # --------------------------------------------------
+
+        info = processor.get_info()
+
+        info["dataset_type"] = dataset_type
+        info["rows_processed"] = len(df)
+
+        info_text = create_pipeline_report(
+            info
+        )
+
+        # --------------------------------------------------
+        # Create ZIP
+        # --------------------------------------------------
+
+        zip_buffer = io.BytesIO()
+
+        with zipfile.ZipFile(
+            zip_buffer,
+            "w",
+            zipfile.ZIP_DEFLATED
+        ) as zip_file:
+
+            zip_file.writestr(
+                "X_train.csv",
+                train_output.to_csv(
+                    index=False
+                )
+            )
+
+            zip_file.writestr(
+                "X_test.csv",
+                X_test_processed.to_csv(
+                    index=False
+                )
+            )
+
+            zip_file.writestr(
+                "pipeline_info.txt",
+                info_text
+            )
+
+        zip_buffer.seek(0)
+
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition":
+                    "attachment; "
+                    "filename=processed_dataset.zip"
+            }
+        )
+
+    # ======================================================
+    # TRAINING DATASET ONLY
+    # ======================================================
+
+    elif dataset_type == "Training Dataset":
+
+        df = await read_csv_file(
+            file,
+            "Training Dataset"
+        )
+
+        # --------------------------------------------------
+        # Validate target
+        # --------------------------------------------------
+
+        if target not in df.columns:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Target column '{target}' "
+                    f"not found in training dataset."
+                )
+            )
+
+        # --------------------------------------------------
+        # Separate X and y
+        # --------------------------------------------------
+
+        X_train = df.drop(
+            columns=[target]
+        )
+
+        y_train = df[target]
+
+        # --------------------------------------------------
+        # Create processor
+        # --------------------------------------------------
+
+        processor = DataPreprocessor(
+            target_col=target
+        )
+
+        task = processor._detect_task(
+            y_train
+        )
+
+        # --------------------------------------------------
+        # Fit on entire uploaded training dataset
+        # --------------------------------------------------
+
+        try:
+
+            X_train_processed = (
+                processor.fit_transform(
+                    X_train,
+                    y_train
+                )
+            )
+
+        except Exception as e:
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Pipeline fitting failed: "
+                    f"{str(e)}"
+                )
+            )
+
+        # --------------------------------------------------
+        # Create output
+        # --------------------------------------------------
+
+        train_output = (
+            X_train_processed.copy()
+        )
+
+        train_output[target] = (
+            y_train.values
+        )
+
+        # --------------------------------------------------
+        # Add IDs
+        # --------------------------------------------------
+
+        train_ids = pd.DataFrame(
+            index=X_train.index
+        )
+
+        for col in processor.id_cols:
+
+            if col in X_train.columns:
+
+                train_ids[col] = X_train[col]
+
+        if not train_ids.empty:
+
+            train_output = pd.concat(
+                [
+                    train_ids.reset_index(
+                        drop=True
+                    ),
+                    train_output.reset_index(
+                        drop=True
+                    )
+                ],
+                axis=1
+            )
+
+        # --------------------------------------------------
+        # Pipeline info
+        # --------------------------------------------------
+
+        info = processor.get_info()
+
+        info["dataset_type"] = dataset_type
+        info["rows_processed"] = len(df)
+
+        info_text = create_pipeline_report(
+            info
+        )
+
+        # --------------------------------------------------
+        # Create ZIP
+        # --------------------------------------------------
+
+        zip_buffer = io.BytesIO()
+
+        with zipfile.ZipFile(
+            zip_buffer,
+            "w",
+            zipfile.ZIP_DEFLATED
+        ) as zip_file:
+
+            zip_file.writestr(
+                "X_train.csv",
+                train_output.to_csv(
+                    index=False
+                )
+            )
+
+            zip_file.writestr(
+                "pipeline_info.txt",
+                info_text
+            )
+
+        zip_buffer.seek(0)
+
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition":
+                    "attachment; "
+                    "filename=processed_training_dataset.zip"
+            }
+        )
+
+    # ======================================================
+    # TEST DATASET
+    # ======================================================
 
     else:
 
-        X_train, X_test, y_train, y_test = (
-            train_test_split(
-                X,
-                y,
-                test_size=0.2,
-                random_state=42
+        # --------------------------------------------------
+        # Both files are REQUIRED
+        # --------------------------------------------------
+
+        if train_file is None:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "A training dataset is required "
+                    "when processing a test dataset."
+                )
             )
+
+        if test_file is None:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "A test dataset is required."
+                )
+            )
+
+        # --------------------------------------------------
+        # Read both datasets
+        # --------------------------------------------------
+
+        train_df = await read_csv_file(
+            train_file,
+            "Training Dataset"
         )
 
-    # ------------------------------------------------------
-    # FIT pipeline ONLY on training data
-    # ------------------------------------------------------
+        test_df = await read_csv_file(
+            test_file,
+            "Test Dataset"
+        )
 
-    try:
+        # --------------------------------------------------
+        # Target must exist in TRAIN
+        # --------------------------------------------------
 
-        X_train_processed = (
+        if target not in train_df.columns:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Target column '{target}' "
+                    f"not found in training dataset."
+                )
+            )
+
+        # --------------------------------------------------
+        # Target should NOT be required in TEST
+        # --------------------------------------------------
+
+        X_train = train_df.drop(
+            columns=[target]
+        )
+
+        y_train = train_df[target]
+
+        # --------------------------------------------------
+        # Test data
+        # --------------------------------------------------
+
+        X_test = test_df.copy()
+
+        # If the test dataset happens to contain the target,
+        # remove it before transformation.
+        if target in X_test.columns:
+
+            X_test = X_test.drop(
+                columns=[target]
+            )
+
+        # --------------------------------------------------
+        # Create processor
+        # --------------------------------------------------
+
+        processor = DataPreprocessor(
+            target_col=target
+        )
+
+        task = processor._detect_task(
+            y_train
+        )
+
+        # --------------------------------------------------
+        # FIT ONLY ON TRAINING DATA
+        # --------------------------------------------------
+
+        try:
+
             processor.fit_transform(
                 X_train,
                 y_train
             )
-        )
 
-    except Exception as e:
+        except Exception as e:
 
-        raise HTTPException(
-            status_code=500,
-            detail=f"Pipeline fitting failed: {str(e)}"
-        )
-
-    # ------------------------------------------------------
-    # Transform test
-    # ------------------------------------------------------
-
-    try:
-
-        X_test_processed, test_ids = (
-            processor.transform(
-                X_test
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Pipeline fitting on training "
+                    f"data failed: {str(e)}"
+                )
             )
-        )
 
-    except Exception as e:
+        # --------------------------------------------------
+        # Transform TEST using fitted processor
+        # --------------------------------------------------
 
-        raise HTTPException(
-            status_code=500,
-            detail=f"Test transformation failed: {str(e)}"
-        )
+        try:
 
-    # ------------------------------------------------------
-    # Create training output
-    # ------------------------------------------------------
-
-    train_output = (
-        X_train_processed.copy()
-    )
-
-    train_output[target] = (
-        y_train.values
-    )
-
-    # ------------------------------------------------------
-    # Add IDs back to training data
-    # ------------------------------------------------------
-
-    train_ids = pd.DataFrame(
-        index=X_train.index
-    )
-
-    for col in processor.id_cols:
-
-        if col in X_train.columns:
-
-            train_ids[col] = X_train[col]
-
-    if not train_ids.empty:
-
-        train_output = pd.concat(
-            [
-                train_ids.reset_index(drop=True),
-                train_output.reset_index(drop=True)
-            ],
-            axis=1
-        )
-
-    # ------------------------------------------------------
-    # Add IDs back to test data
-    # ------------------------------------------------------
-
-    if not test_ids.empty:
-
-        X_test_processed = pd.concat(
-            [
-                test_ids.reset_index(drop=True),
-                X_test_processed.reset_index(drop=True)
-            ],
-            axis=1
-        )
-
-    # ======================================================
-    # CREATE PIPELINE INFORMATION
-    # ======================================================
-
-    info = processor.get_info()
-
-    info_text = create_pipeline_report(
-        info
-    )
-
-    # ======================================================
-    # CREATE ZIP
-    # ======================================================
-
-    zip_buffer = io.BytesIO()
-
-    with zipfile.ZipFile(
-        zip_buffer,
-        "w",
-        zipfile.ZIP_DEFLATED
-    ) as zip_file:
-
-        # ----------------------------------------------
-        # X_train
-        # ----------------------------------------------
-
-        zip_file.writestr(
-            "X_train.csv",
-            train_output.to_csv(
-                index=False
+            X_test_processed, test_ids = (
+                processor.transform(
+                    X_test
+                )
             )
-        )
 
-        # ----------------------------------------------
-        # X_test
-        # ----------------------------------------------
+        except Exception as e:
 
-        zip_file.writestr(
-            "X_test.csv",
-            X_test_processed.to_csv(
-                index=False
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Test transformation failed: "
+                    f"{str(e)}"
+                )
             )
+
+        # --------------------------------------------------
+        # Add IDs back
+        # --------------------------------------------------
+
+        if not test_ids.empty:
+
+            X_test_processed = pd.concat(
+                [
+                    test_ids.reset_index(
+                        drop=True
+                    ),
+                    X_test_processed.reset_index(
+                        drop=True
+                    )
+                ],
+                axis=1
+            )
+
+        # --------------------------------------------------
+        # Pipeline info
+        # --------------------------------------------------
+
+        info = processor.get_info()
+
+        info["dataset_type"] = dataset_type
+        info["rows_processed"] = len(test_df)
+
+        info_text = create_pipeline_report(
+            info
         )
 
-        # ----------------------------------------------
-        # Pipeline information
-        # ----------------------------------------------
+        # --------------------------------------------------
+        # Create ZIP
+        # --------------------------------------------------
 
-        zip_file.writestr(
-            "pipeline_info.txt",
-            info_text
+        zip_buffer = io.BytesIO()
+
+        with zipfile.ZipFile(
+            zip_buffer,
+            "w",
+            zipfile.ZIP_DEFLATED
+        ) as zip_file:
+
+            zip_file.writestr(
+                "X_test.csv",
+                X_test_processed.to_csv(
+                    index=False
+                )
+            )
+
+            zip_file.writestr(
+                "pipeline_info.txt",
+                info_text
+            )
+
+        zip_buffer.seek(0)
+
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition":
+                    "attachment; "
+                    "filename=processed_test_dataset.zip"
+            }
         )
-
-    # Reset buffer
-    zip_buffer.seek(0)
-
-    # ======================================================
-    # RETURN ZIP
-    # ======================================================
-
-    return StreamingResponse(
-        zip_buffer,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition":
-                "attachment; "
-                "filename=processed_dataset.zip"
-        }
-    )
