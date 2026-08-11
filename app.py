@@ -35,6 +35,7 @@ st.set_page_config(
 
 defaults = {
     "processed": False,
+
     "zip_bytes": None,
     "x_train_bytes": None,
     "x_test_bytes": None,
@@ -43,15 +44,20 @@ defaults = {
     "eda_report_bytes": None,
     "eda_generated": False,
 
+    "eda_running": False,
+    "processing_running": False,
+
     "processed_target": None,
     "processed_dataset_type": None,
 
     "previous_dataset_type": None,
 }
 
+
 for key, value in defaults.items():
 
     if key not in st.session_state:
+
         st.session_state[key] = value
 
 
@@ -64,19 +70,14 @@ def clear_results():
     st.session_state.processed = False
 
     st.session_state.zip_bytes = None
-
     st.session_state.x_train_bytes = None
-
     st.session_state.x_test_bytes = None
-
     st.session_state.pipeline_info_bytes = None
 
     st.session_state.eda_report_bytes = None
-
     st.session_state.eda_generated = False
 
     st.session_state.processed_target = None
-
     st.session_state.processed_dataset_type = None
 
 
@@ -84,10 +85,7 @@ def clear_results():
 # NUMERICAL FEATURE ANALYSIS
 # ==========================================================
 
-def render_numerical_analysis(
-    df,
-    feature
-):
+def render_numerical_analysis(df, feature):
 
     data = df[feature]
 
@@ -135,10 +133,11 @@ def render_numerical_analysis(
 
         mean_value = data.mean()
 
-        if pd.isna(mean_value):
-            mean_text = "N/A"
-        else:
-            mean_text = f"{mean_value:.3f}"
+        mean_text = (
+            "N/A"
+            if pd.isna(mean_value)
+            else f"{mean_value:.3f}"
+        )
 
         st.metric(
             "Mean",
@@ -146,7 +145,7 @@ def render_numerical_analysis(
         )
 
     # ------------------------------------------------------
-    # Statistics + Distribution
+    # Statistics
     # ------------------------------------------------------
 
     col1, col2 = st.columns(2)
@@ -179,6 +178,10 @@ def render_numerical_analysis(
             hide_index=True,
             use_container_width=True
         )
+
+    # ------------------------------------------------------
+    # Distribution
+    # ------------------------------------------------------
 
     with col2:
 
@@ -242,10 +245,7 @@ def render_numerical_analysis(
 # CATEGORICAL FEATURE ANALYSIS
 # ==========================================================
 
-def render_categorical_analysis(
-    df,
-    feature
-):
+def render_categorical_analysis(df, feature):
 
     data = df[feature]
 
@@ -290,10 +290,12 @@ def render_categorical_analysis(
         )
 
     # ------------------------------------------------------
-    # Category distribution
+    # Category Distribution
     # ------------------------------------------------------
 
-    st.write("**Category Distribution**")
+    st.write(
+        "**Category Distribution**"
+    )
 
     value_counts = (
         data
@@ -336,10 +338,7 @@ def render_categorical_analysis(
 # FEATURE ANALYSIS DISPATCHER
 # ==========================================================
 
-def render_feature_analysis(
-    df,
-    feature
-):
+def render_feature_analysis(df, feature):
 
     if pd.api.types.is_numeric_dtype(
         df[feature]
@@ -362,10 +361,7 @@ def render_feature_analysis(
 # TARGET ANALYSIS
 # ==========================================================
 
-def render_target_analysis(
-    df,
-    target
-):
+def render_target_analysis(df, target):
 
     st.subheader(
         "🎯 Target Analysis"
@@ -551,18 +547,11 @@ def render_target_analysis(
 # FULL SWEETVIZ REPORT
 # ==========================================================
 
-def generate_sweetviz_report(
-    df,
-    target
-):
+def generate_sweetviz_report(df, target):
 
     temp_path = None
 
     try:
-
-        # --------------------------------------------------
-        # Limit only the EDA report
-        # --------------------------------------------------
 
         MAX_EDA_ROWS = 5000
 
@@ -577,10 +566,6 @@ def generate_sweetviz_report(
 
             eda_df = df.copy()
 
-        # --------------------------------------------------
-        # Temporary HTML file
-        # --------------------------------------------------
-
         temp_file = tempfile.NamedTemporaryFile(
             suffix=".html",
             delete=False
@@ -589,10 +574,6 @@ def generate_sweetviz_report(
         temp_path = temp_file.name
 
         temp_file.close()
-
-        # --------------------------------------------------
-        # Generate Sweetviz
-        # --------------------------------------------------
 
         report = sv.analyze(
             eda_df,
@@ -605,10 +586,6 @@ def generate_sweetviz_report(
             open_browser=False,
             layout="widescreen"
         )
-
-        # --------------------------------------------------
-        # Read HTML
-        # --------------------------------------------------
 
         with open(
             temp_path,
@@ -630,10 +607,13 @@ def generate_sweetviz_report(
         ):
 
             try:
+
                 os.remove(
                     temp_path
                 )
+
             except Exception:
+
                 pass
 
 
@@ -641,10 +621,9 @@ def generate_sweetviz_report(
 # RUN SWEETVIZ
 # ==========================================================
 
-def run_sweetviz(
-    df,
-    target
-):
+def run_sweetviz(df, target):
+
+    st.session_state.eda_running = True
 
     try:
 
@@ -676,15 +655,16 @@ def run_sweetviz(
             f"{str(e)}"
         )
 
+    finally:
+
+        st.session_state.eda_running = False
+
 
 # ==========================================================
-# RENDER ON-SCREEN EDA
+# ON-SCREEN EDA
 # ==========================================================
 
-def render_full_eda(
-    df,
-    target_column
-):
+def render_full_eda(df, target_column):
 
     st.divider()
 
@@ -702,7 +682,7 @@ def render_full_eda(
     )
 
     # ------------------------------------------------------
-    # Feature types
+    # Feature Types
     # ------------------------------------------------------
 
     numerical_features = [
@@ -724,7 +704,7 @@ def render_full_eda(
     ]
 
     # ======================================================
-    # NUMERICAL FEATURES
+    # NUMERICAL
     # ======================================================
 
     with st.expander(
@@ -754,7 +734,7 @@ def render_full_eda(
             )
 
     # ======================================================
-    # CATEGORICAL FEATURES
+    # CATEGORICAL
     # ======================================================
 
     with st.expander(
@@ -806,10 +786,24 @@ def render_sweetviz_section(
         "interactive Sweetviz report."
     )
 
+    st.warning(
+        "⚠️ Full report generation can take around "
+        "5 minutes depending on the size and complexity "
+        "of your dataset. Preprocessing will be disabled "
+        "while the report is being generated."
+    )
+
+    generate_disabled = (
+        st.session_state.eda_running
+        or
+        st.session_state.processing_running
+    )
+
     if st.button(
         "📊 Generate Full Sweetviz Report",
         use_container_width=True,
-        key=f"generate_sweetviz_{key_suffix}"
+        key=f"generate_sweetviz_{key_suffix}",
+        disabled=generate_disabled
     ):
 
         run_sweetviz(
@@ -870,7 +864,7 @@ dataset_type = st.radio(
 
 
 # ==========================================================
-# RESET WHEN DATASET TYPE CHANGES
+# DATASET TYPE CHANGE
 # ==========================================================
 
 if (
@@ -966,7 +960,7 @@ else:
 
 
 # ==========================================================
-# ENTIRE DATASET / TRAINING DATASET
+# SINGLE DATASET WORKFLOW
 # ==========================================================
 
 if (
@@ -977,10 +971,6 @@ if (
     and
     uploaded_file is not None
 ):
-
-    # ------------------------------------------------------
-    # Read CSV
-    # ------------------------------------------------------
 
     try:
 
@@ -997,10 +987,6 @@ if (
         )
 
         st.stop()
-
-    # ------------------------------------------------------
-    # Dataset loaded
-    # ------------------------------------------------------
 
     st.success(
         f"Dataset loaded successfully — "
@@ -1021,7 +1007,7 @@ if (
     )
 
     # ------------------------------------------------------
-    # Dataset overview
+    # Overview
     # ------------------------------------------------------
 
     numerical_features = [
@@ -1087,7 +1073,7 @@ if (
     )
 
     # ------------------------------------------------------
-    # Target selection
+    # Target
     # ------------------------------------------------------
 
     st.subheader(
@@ -1125,22 +1111,31 @@ if (
     )
 
     # ======================================================
-    # PROCESS
+    # PROCESS DATASET
     # ======================================================
 
     st.divider()
 
+    process_disabled = (
+        st.session_state.eda_running
+        or
+        st.session_state.processing_running
+    )
+
     if st.button(
         "🚀 Process Dataset",
         use_container_width=True,
-        key="process_single_dataset"
+        key="process_single_dataset",
+        disabled=process_disabled
     ):
 
-        with st.spinner(
-            "Running preprocessing and feature selection..."
-        ):
+        st.session_state.processing_running = True
 
-            try:
+        try:
+
+            with st.spinner(
+                "Running preprocessing and feature selection..."
+            ):
 
                 uploaded_file.seek(0)
 
@@ -1192,7 +1187,7 @@ if (
                 )
 
                 # --------------------------------------------------
-                # Extract ZIP
+                # Extract files
                 # --------------------------------------------------
 
                 with zipfile.ZipFile(
@@ -1256,28 +1251,32 @@ if (
                     "✅ Dataset processed successfully!"
                 )
 
-            except requests.exceptions.ConnectionError:
+        except requests.exceptions.ConnectionError:
 
-                st.error(
-                    "Could not connect to the preprocessing API."
-                )
+            st.error(
+                "Could not connect to the preprocessing API."
+            )
 
-            except requests.exceptions.Timeout:
+        except requests.exceptions.Timeout:
 
-                st.error(
-                    "The request timed out."
-                )
+            st.error(
+                "The request timed out."
+            )
 
-            except Exception as e:
+        except Exception as e:
 
-                st.error(
-                    f"An unexpected error occurred: "
-                    f"{str(e)}"
-                )
+            st.error(
+                f"An unexpected error occurred: "
+                f"{str(e)}"
+            )
+
+        finally:
+
+            st.session_state.processing_running = False
 
 
 # ==========================================================
-# TEST DATASET MODE
+# TEST DATASET WORKFLOW
 # ==========================================================
 
 if (
@@ -1327,10 +1326,6 @@ if (
         )
 
         st.stop()
-
-    # ------------------------------------------------------
-    # Loaded information
-    # ------------------------------------------------------
 
     st.success(
         f"Training dataset loaded — "
@@ -1413,18 +1408,27 @@ if (
 
     st.divider()
 
+    process_disabled = (
+        st.session_state.eda_running
+        or
+        st.session_state.processing_running
+    )
+
     if st.button(
         "🚀 Process Test Dataset",
         use_container_width=True,
-        key="process_test_dataset"
+        key="process_test_dataset",
+        disabled=process_disabled
     ):
 
-        with st.spinner(
-            "Fitting preprocessing on training data "
-            "and transforming test data..."
-        ):
+        st.session_state.processing_running = True
 
-            try:
+        try:
+
+            with st.spinner(
+                "Fitting preprocessing on training data "
+                "and transforming test data..."
+            ):
 
                 train_file.seek(0)
                 test_file.seek(0)
@@ -1538,24 +1542,28 @@ if (
                     "✅ Test dataset processed successfully!"
                 )
 
-            except requests.exceptions.ConnectionError:
+        except requests.exceptions.ConnectionError:
 
-                st.error(
-                    "Could not connect to the preprocessing API."
-                )
+            st.error(
+                "Could not connect to the preprocessing API."
+            )
 
-            except requests.exceptions.Timeout:
+        except requests.exceptions.Timeout:
 
-                st.error(
-                    "The request timed out."
-                )
+            st.error(
+                "The request timed out."
+            )
 
-            except Exception as e:
+        except Exception as e:
 
-                st.error(
-                    f"An unexpected error occurred: "
-                    f"{str(e)}"
-                )
+            st.error(
+                f"An unexpected error occurred: "
+                f"{str(e)}"
+            )
+
+        finally:
+
+            st.session_state.processing_running = False
 
 
 # ==========================================================
@@ -1742,6 +1750,7 @@ if st.session_state.processed:
             )
 
         except Exception:
+
             pass
 
     # ------------------------------------------------------
@@ -1773,4 +1782,5 @@ if st.session_state.processed:
             )
 
         except Exception:
+
             pass
