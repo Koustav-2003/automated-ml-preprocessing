@@ -57,7 +57,6 @@ defaults = {
 for key, value in defaults.items():
 
     if key not in st.session_state:
-
         st.session_state[key] = value
 
 
@@ -152,7 +151,9 @@ def render_numerical_analysis(df, feature):
 
     with col1:
 
-        st.write("**Summary Statistics**")
+        st.write(
+            "**Summary Statistics**"
+        )
 
         stats = pd.DataFrame({
             "Statistic": [
@@ -185,7 +186,9 @@ def render_numerical_analysis(df, feature):
 
     with col2:
 
-        st.write("**Distribution**")
+        st.write(
+            "**Distribution**"
+        )
 
         clean_data = data.dropna()
 
@@ -211,7 +214,9 @@ def render_numerical_analysis(df, feature):
     # Proper Box Plot
     # ------------------------------------------------------
 
-    st.write("**Box Plot**")
+    st.write(
+        "**Box Plot**"
+    )
 
     clean_data = data.dropna()
 
@@ -704,7 +709,7 @@ def render_full_eda(df, target_column):
     ]
 
     # ======================================================
-    # NUMERICAL
+    # NUMERICAL FEATURES
     # ======================================================
 
     with st.expander(
@@ -734,7 +739,7 @@ def render_full_eda(df, target_column):
             )
 
     # ======================================================
-    # CATEGORICAL
+    # CATEGORICAL FEATURES
     # ======================================================
 
     with st.expander(
@@ -771,7 +776,8 @@ def render_full_eda(df, target_column):
 def render_sweetviz_section(
     df,
     target_column,
-    key_suffix
+    key_suffix,
+    description=None
 ):
 
     st.divider()
@@ -780,11 +786,19 @@ def render_sweetviz_section(
         "📋 Full EDA Report"
     )
 
-    st.write(
-        "The on-screen EDA above analyzes every feature. "
-        "You can optionally generate a comprehensive "
-        "interactive Sweetviz report."
-    )
+    if description:
+
+        st.write(
+            description
+        )
+
+    else:
+
+        st.write(
+            "The on-screen EDA above analyzes every feature. "
+            "You can optionally generate a comprehensive "
+            "interactive Sweetviz report."
+        )
 
     st.warning(
         "⚠️ Full report generation can take around "
@@ -972,6 +986,10 @@ if (
     uploaded_file is not None
 ):
 
+    # ------------------------------------------------------
+    # Read CSV
+    # ------------------------------------------------------
+
     try:
 
         uploaded_file.seek(0)
@@ -988,13 +1006,17 @@ if (
 
         st.stop()
 
+    # ------------------------------------------------------
+    # Dataset loaded
+    # ------------------------------------------------------
+
     st.success(
         f"Dataset loaded successfully — "
         f"{df.shape[0]} rows × {df.shape[1]} columns"
     )
 
     # ------------------------------------------------------
-    # Preview
+    # Dataset Preview
     # ------------------------------------------------------
 
     st.subheader(
@@ -1007,7 +1029,7 @@ if (
     )
 
     # ------------------------------------------------------
-    # Overview
+    # Dataset Overview
     # ------------------------------------------------------
 
     numerical_features = [
@@ -1073,7 +1095,7 @@ if (
     )
 
     # ------------------------------------------------------
-    # Target
+    # Target Selection
     # ------------------------------------------------------
 
     st.subheader(
@@ -1187,7 +1209,7 @@ if (
                 )
 
                 # --------------------------------------------------
-                # Extract files
+                # Extract Files
                 # --------------------------------------------------
 
                 with zipfile.ZipFile(
@@ -1288,7 +1310,7 @@ if (
 ):
 
     # ------------------------------------------------------
-    # Read training
+    # Read Training Dataset
     # ------------------------------------------------------
 
     try:
@@ -1308,7 +1330,7 @@ if (
         st.stop()
 
     # ------------------------------------------------------
-    # Read test
+    # Read Test Dataset
     # ------------------------------------------------------
 
     try:
@@ -1326,6 +1348,10 @@ if (
         )
 
         st.stop()
+
+    # ------------------------------------------------------
+    # Dataset Information
+    # ------------------------------------------------------
 
     st.success(
         f"Training dataset loaded — "
@@ -1384,6 +1410,16 @@ if (
     )
 
     # ------------------------------------------------------
+    # EDA INFORMATION
+    # ------------------------------------------------------
+
+    st.info(
+        "ℹ️ EDA is performed on the **training dataset only**. "
+        "The test dataset is kept unseen because it should not "
+        "influence preprocessing or feature-selection decisions."
+    )
+
+    # ------------------------------------------------------
     # EDA
     # ------------------------------------------------------
 
@@ -1399,7 +1435,14 @@ if (
     render_sweetviz_section(
         train_df,
         target_column,
-        "test"
+        "test",
+        description=(
+            "The on-screen EDA and Sweetviz report are generated "
+            "using the **training dataset only**. The test dataset "
+            "is kept separate and is only transformed after the "
+            "preprocessing pipeline has been fitted on the "
+            "training data."
+        )
     )
 
     # ======================================================
