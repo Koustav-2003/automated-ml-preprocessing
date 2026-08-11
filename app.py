@@ -1040,7 +1040,7 @@ st.session_state.previous_ml_task = ml_task
 if ml_task == "Supervised Learning":
 
     with st.container(border=True):
-        st.subheader("🔬 Supervised Processing")
+        st.subheader("📂 Choose your dataset workflow")
         st.caption(
             "Select how your supervised dataset is structured."
         )
@@ -2045,57 +2045,6 @@ else:
             unsupervised_df,
             unsupervised=True
         )
-
-        # ==================================================
-        # UNSUPERVISED NUMERICAL BOX PLOTS
-        # ==================================================
-
-        with st.expander(
-            f"📦 Numerical Box Plots ({len(numerical_features)})",
-            expanded=False
-        ):
-
-            if numerical_features:
-
-                st.caption(
-                    "Box plots for all numerical features. "
-                    "Expand this section to inspect distributions "
-                    "and potential outliers."
-                )
-
-                for feature in numerical_features:
-
-                    clean_data = (
-                        unsupervised_df[feature]
-                        .dropna()
-                    )
-
-                    if clean_data.empty:
-                        continue
-
-                    fig = px.box(
-                        clean_data,
-                        y=feature,
-                        points="outliers",
-                        title=f"Box Plot - {feature}"
-                    )
-
-                    fig.update_layout(
-                        height=400,
-                        showlegend=False
-                    )
-
-                    st.plotly_chart(
-                        fig,
-                        use_container_width=True
-                    )
-
-            else:
-
-                st.info(
-                    "No numerical features available "
-                    "for box plots."
-                )
 
         # ==================================================
         # SWEETVIZ
