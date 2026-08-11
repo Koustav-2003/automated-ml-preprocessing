@@ -437,47 +437,37 @@ if (
 # OUTPUT PREVIEW
 # ==========================================================
 
-st.divider()
+if (
+    st.session_state.processed
+    and st.session_state.x_train_bytes
+    and st.session_state.x_test_bytes
+):
 
-st.subheader("🔍 Processed Dataset Preview")
+    st.divider()
 
-try:
+    st.subheader("🔍 Processed Dataset Preview")
 
-    # ------------------------------------------------------
-    # Validate returned files
-    # ------------------------------------------------------
+    try:
 
-    x_train_bytes = st.session_state.x_train_bytes
-    x_test_bytes = st.session_state.x_test_bytes
+        # --------------------------------------------------
+        # Convert processed files back to DataFrames
+        # --------------------------------------------------
 
-    if not x_train_bytes:
-        st.warning(
-            "X_train.csv is empty, so a preview cannot be displayed."
-        )
-        x_train_preview = None
-    else:
         x_train_preview = pd.read_csv(
-            io.BytesIO(x_train_bytes)
+            io.BytesIO(
+                st.session_state.x_train_bytes
+            )
         )
 
-    if not x_test_bytes:
-        st.warning(
-            "X_test.csv is empty, so a preview cannot be displayed."
-        )
-        x_test_preview = None
-    else:
         x_test_preview = pd.read_csv(
-            io.BytesIO(x_test_bytes)
+            io.BytesIO(
+                st.session_state.x_test_bytes
+            )
         )
 
-    # ------------------------------------------------------
-    # Output statistics
-    # ------------------------------------------------------
-
-    if (
-        x_train_preview is not None
-        and x_test_preview is not None
-    ):
+        # --------------------------------------------------
+        # Dataset statistics
+        # --------------------------------------------------
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -526,7 +516,7 @@ try:
         )
 
         # --------------------------------------------------
-        # TRAIN PREVIEW
+        # X TRAIN PREVIEW
         # --------------------------------------------------
 
         with train_tab:
@@ -542,7 +532,7 @@ try:
             )
 
         # --------------------------------------------------
-        # TEST PREVIEW
+        # X TEST PREVIEW
         # --------------------------------------------------
 
         with test_tab:
@@ -557,16 +547,17 @@ try:
                 use_container_width=True
             )
 
-except pd.errors.EmptyDataError:
+    except (
+        pd.errors.EmptyDataError,
+        pd.errors.ParserError
+    ):
 
-    st.warning(
-        "The processed CSV could not be previewed "
-        "because it contains no readable data. "
-        "You can still download the files below."
-    )
+        # Don't show an error/warning to the user.
+        # Simply skip the preview.
+        pass
 
-except Exception as e:
+    except Exception:
 
-    st.warning(
-        f"Could not display the processed preview: {str(e)}"
-    )
+        # Prevent preview problems from crashing
+        # the rest of the application.
+        pass
