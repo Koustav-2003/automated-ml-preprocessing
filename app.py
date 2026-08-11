@@ -2126,7 +2126,6 @@ else:
         "prepared using only the feature columns."
     )
 
-
     render_html(
         """
 <div class="section-card">
@@ -2137,22 +2136,20 @@ else:
 
     <div class="section-card-description">
         Upload a dataset without selecting a target variable.
-        The unsupervised preprocessing pipeline will prepare
-        the features for algorithms such as clustering,
-        dimensionality reduction and anomaly detection.
+        The pipeline will automatically handle missing values,
+        categorical features, skewness, scaling and other
+        preprocessing steps required for unsupervised learning.
     </div>
 
 </div>
 """
     )
 
-
     unsupervised_file = st.file_uploader(
         "📁 Upload your dataset",
         type=["csv"],
         key="unsupervised_dataset_upload"
     )
-
 
     if unsupervised_file is not None:
 
@@ -2172,27 +2169,28 @@ else:
 
             st.stop()
 
-
         st.success(
             f"Dataset loaded successfully — "
             f"{unsupervised_df.shape[0]:,} rows × "
             f"{unsupervised_df.shape[1]:,} columns"
         )
 
-
         # ==================================================
-        # PREVIEW
+        # DATASET PREVIEW
         # ==================================================
 
         st.subheader(
             "👀 Dataset Preview"
         )
 
+        st.caption(
+            "Showing the first 20 rows."
+        )
+
         st.dataframe(
             unsupervised_df.head(20),
             use_container_width=True
         )
-
 
         # ==================================================
         # DATASET INFORMATION
@@ -2214,9 +2212,7 @@ else:
             )
         ]
 
-
         col1, col2, col3, col4, col5 = st.columns(5)
-
 
         with col1:
 
@@ -2225,14 +2221,12 @@ else:
                 f"{unsupervised_df.shape[0]:,}"
             )
 
-
         with col2:
 
             st.metric(
                 "Columns",
                 f"{unsupervised_df.shape[1]:,}"
             )
-
 
         with col3:
 
@@ -2241,14 +2235,12 @@ else:
                 len(numerical_features)
             )
 
-
         with col4:
 
             st.metric(
                 "Categorical",
                 len(categorical_features)
             )
-
 
         with col5:
 
@@ -2257,12 +2249,10 @@ else:
                 f"{int(unsupervised_df.isnull().sum().sum()):,}"
             )
 
-
         st.caption(
             f"Duplicate rows: "
             f"**{int(unsupervised_df.duplicated().sum()):,}**"
         )
-
 
         # ==================================================
         # EDA
@@ -2275,9 +2265,13 @@ else:
         )
 
         st.caption(
-            "EDA is performed without using a target variable."
+            "EDA is performed across all features without "
+            "using a target variable."
         )
 
+        # ==================================================
+        # NUMERICAL FEATURES
+        # ==================================================
 
         with st.expander(
             f"➕ Numerical Features "
@@ -2294,43 +2288,111 @@ else:
 
                     data = unsupervised_df[feature]
 
-                    col1, col2, col3 = st.columns(3)
+                    missing_count = int(
+                        data.isnull().sum()
+                    )
 
+                    missing_percentage = (
+                        data.isnull().mean() * 100
+                    )
+
+                    unique_count = int(
+                        data.nunique()
+                    )
+
+                    col1, col2, col3, col4 = st.columns(4)
 
                     with col1:
 
                         st.metric(
-                            "Missing",
-                            int(
-                                data.isnull().sum()
-                            )
+                            "Type",
+                            "Numerical"
                         )
-
 
                     with col2:
 
                         st.metric(
-                            "Unique",
-                            int(
-                                data.nunique()
-                            )
+                            "Missing",
+                            f"{missing_count}"
                         )
-
 
                     with col3:
 
-                        mean_value = data.mean()
-
                         st.metric(
-                            "Mean",
-                            "N/A"
-                            if pd.isna(mean_value)
-                            else f"{mean_value:.3f}"
+                            "Missing %",
+                            f"{missing_percentage:.2f}%"
                         )
 
+                    with col4:
+
+                        st.metric(
+                            "Unique Values",
+                            unique_count
+                        )
+
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+
+                        st.write(
+                            "**Summary Statistics**"
+                        )
+
+                        stats = pd.DataFrame({
+
+                            "Statistic": [
+                                "Mean",
+                                "Median",
+                                "Std Dev",
+                                "Minimum",
+                                "Maximum",
+                                "Skewness"
+                            ],
+
+                            "Value": [
+                                data.mean(),
+                                data.median(),
+                                data.std(),
+                                data.min(),
+                                data.max(),
+                                data.skew()
+                            ]
+
+                        })
+
+                        st.dataframe(
+                            stats,
+                            hide_index=True,
+                            use_container_width=True
+                        )
+
+                    with col2:
+
+                        st.write(
+                            "**Distribution**"
+                        )
+
+                        clean_data = data.dropna()
+
+                        if not clean_data.empty:
+
+                            st.bar_chart(
+                                clean_data
+                                .value_counts()
+                                .sort_index()
+                            )
+
+                        else:
+
+                            st.info(
+                                "No values available."
+                            )
+
+                    st.write(
+                        "**Box Plot**"
+                    )
 
                     clean_data = data.dropna()
-
 
                     if not clean_data.empty:
 
@@ -2351,6 +2413,9 @@ else:
                             use_container_width=True
                         )
 
+        # ==================================================
+        # CATEGORICAL FEATURES
+        # ==================================================
 
         with st.expander(
             f"➕ Categorical Features "
@@ -2367,30 +2432,51 @@ else:
 
                     data = unsupervised_df[feature]
 
-                    col1, col2 = st.columns(2)
+                    missing_count = int(
+                        data.isnull().sum()
+                    )
 
+                    missing_percentage = (
+                        data.isnull().mean() * 100
+                    )
+
+                    unique_count = int(
+                        data.nunique()
+                    )
+
+                    col1, col2, col3 = st.columns(3)
 
                     with col1:
 
                         st.metric(
-                            "Unique Values",
-                            int(
-                                data.nunique()
-                            )
+                            "Type",
+                            "Categorical"
                         )
-
 
                     with col2:
 
                         st.metric(
                             "Missing",
-                            int(
-                                data.isnull().sum()
-                            )
+                            f"{missing_count}"
                         )
 
+                    with col3:
 
-                    st.bar_chart(
+                        st.metric(
+                            "Missing %",
+                            f"{missing_percentage:.2f}%"
+                        )
+
+                    st.metric(
+                        "Unique Values",
+                        unique_count
+                    )
+
+                    st.write(
+                        "**Category Distribution**"
+                    )
+
+                    value_counts = (
                         data
                         .fillna("Missing")
                         .astype(str)
@@ -2398,9 +2484,168 @@ else:
                         .head(15)
                     )
 
+                    if not value_counts.empty:
+
+                        st.bar_chart(
+                            value_counts
+                        )
+
+                        category_table = pd.DataFrame({
+
+                            "Category":
+                                value_counts.index,
+
+                            "Count":
+                                value_counts.values,
+
+                            "Percentage":
+                                (
+                                    value_counts.values
+                                    / len(data)
+                                    * 100
+                                ).round(2)
+
+                        })
+
+                        st.dataframe(
+                            category_table,
+                            hide_index=True,
+                            use_container_width=True
+                        )
+
+                    else:
+
+                        st.info(
+                            "No categorical values available."
+                        )
 
         # ==================================================
-        # CURRENT STATUS
+        # SWEETVIZ
+        # ==================================================
+
+        st.divider()
+
+        st.subheader(
+            "📋 Full EDA Report"
+        )
+
+        st.write(
+            "The on-screen EDA above analyzes every feature. "
+            "You can optionally generate a comprehensive "
+            "interactive Sweetviz report."
+        )
+
+        st.warning(
+            "⚠️ Full report generation can take around "
+            "5 minutes depending on the size and complexity "
+            "of your dataset. Processing will be disabled "
+            "while the report is being generated."
+        )
+
+        if st.button(
+            "📊 Generate Full Sweetviz Report",
+            use_container_width=True,
+            key="generate_sweetviz_unsupervised",
+            disabled=(
+                st.session_state.eda_running
+                or
+                st.session_state.processing_running
+            )
+        ):
+
+            st.session_state.eda_running = True
+
+            try:
+
+                with st.spinner(
+                    "Generating full Sweetviz report..."
+                ):
+
+                    MAX_EDA_ROWS = 5000
+
+                    if len(unsupervised_df) > MAX_EDA_ROWS:
+
+                        eda_df = unsupervised_df.sample(
+                            n=MAX_EDA_ROWS,
+                            random_state=42
+                        )
+
+                    else:
+
+                        eda_df = unsupervised_df.copy()
+
+                    temp_file = tempfile.NamedTemporaryFile(
+                        suffix=".html",
+                        delete=False
+                    )
+
+                    temp_path = temp_file.name
+
+                    temp_file.close()
+
+                    # IMPORTANT:
+                    # No target_feat for unsupervised learning.
+
+                    report = sv.analyze(
+                        eda_df,
+                        pairwise_analysis="off"
+                    )
+
+                    report.show_html(
+                        filepath=temp_path,
+                        open_browser=False,
+                        layout="widescreen"
+                    )
+
+                    with open(
+                        temp_path,
+                        "rb"
+                    ) as html_file:
+
+                        st.session_state.eda_report_bytes = (
+                            html_file.read()
+                        )
+
+                    st.session_state.eda_generated = True
+
+                    st.success(
+                        "✅ Full unsupervised EDA report generated."
+                    )
+
+                if os.path.exists(temp_path):
+
+                    os.remove(
+                        temp_path
+                    )
+
+            except Exception as e:
+
+                st.error(
+                    f"Sweetviz report generation failed: "
+                    f"{str(e)}"
+                )
+
+            finally:
+
+                st.session_state.eda_running = False
+
+        if (
+            st.session_state.eda_generated
+            and
+            st.session_state.eda_report_bytes is not None
+        ):
+
+            st.download_button(
+                label="📄 Download Full EDA Report (HTML)",
+                data=st.session_state.eda_report_bytes,
+                file_name="unsupervised_eda_report.html",
+                mime="text/html",
+                use_container_width=True,
+                key="download_sweetviz_unsupervised"
+            )
+
+        # ==================================================
+        # UNSUPERVISED PROCESSING
         # ==================================================
 
         st.divider()
@@ -2409,287 +2654,160 @@ else:
             "⚙️ Unsupervised Processing"
         )
 
-        st.warning(
-            "🚧 The unsupervised preprocessing pipeline is "
-            "not connected yet. The UI is ready, but the "
-            "backend and preprocessing pipeline need to be "
-            "updated before this dataset can be processed."
-        )
-
-
         st.caption(
-            "The next step is to add target-free preprocessing "
-            "to pipeline.py and route it through main.py."
+            "No target variable is used. The pipeline will "
+            "detect ID-like columns, handle missing values, "
+            "process categorical variables, transform skewed "
+            "features and scale the resulting feature matrix."
         )
 
-
-        st.button(
+        if st.button(
             "🚀 Process Unsupervised Dataset",
             use_container_width=True,
-            disabled=True,
-            key="process_unsupervised_dataset"
-        )
-
-
-# ==========================================================
-# DOWNLOAD RESULTS
-# ==========================================================
-
-if (
-    st.session_state.processed
-    and
-    st.session_state.zip_bytes is not None
-):
-
-    st.divider()
-
-
-    render_html(
-        """
-<div class="download-card">
-
-    <div class="download-title">
-        📥 Your processed data is ready
-    </div>
-
-    <div class="download-description">
-        Download individual outputs below or grab
-        everything together as a ZIP archive.
-    </div>
-
-</div>
-"""
-    )
-
-
-    download_items = []
-
-
-    if st.session_state.x_train_bytes is not None:
-
-        download_items.append(
-            (
-                "X_train.csv",
-                st.session_state.x_train_bytes,
-                "text/csv"
+            key="process_unsupervised_dataset",
+            disabled=(
+                st.session_state.eda_running
+                or
+                st.session_state.processing_running
             )
-        )
-
-
-    if st.session_state.x_test_bytes is not None:
-
-        download_items.append(
-            (
-                "X_test.csv",
-                st.session_state.x_test_bytes,
-                "text/csv"
-            )
-        )
-
-
-    if st.session_state.pipeline_info_bytes is not None:
-
-        download_items.append(
-            (
-                "pipeline_info.txt",
-                st.session_state.pipeline_info_bytes,
-                "text/plain"
-            )
-        )
-
-
-    if download_items:
-
-        columns = st.columns(
-            len(download_items)
-        )
-
-
-        for column, item in zip(
-            columns,
-            download_items
         ):
 
-            filename, data, mime = item
+            st.session_state.processing_running = True
 
+            try:
 
-            with column:
+                with st.spinner(
+                    "Running unsupervised preprocessing..."
+                ):
 
-                if filename == "pipeline_info.txt":
+                    unsupervised_file.seek(0)
 
-                    label = "📄 Pipeline Info"
+                    response = requests.post(
 
-                else:
+                        API_URL,
 
-                    label = f"⬇️ {filename}"
+                        files={
+                            "file": (
+                                unsupervised_file.name,
+                                unsupervised_file,
+                                "text/csv"
+                            )
+                        },
 
+                        data={
+                            "ml_task":
+                                "Unsupervised Learning",
 
-                st.download_button(
-                    label=label,
-                    data=data,
-                    file_name=filename,
-                    mime=mime,
-                    use_container_width=True,
-                    key=f"download_{filename}"
-                )
+                            "dataset_type":
+                                "Unsupervised Dataset"
+                        },
 
+                        timeout=300
+                    )
 
-    st.download_button(
-        label="📦 Download All Files (ZIP)",
-        data=st.session_state.zip_bytes,
-        file_name="processed_dataset.zip",
-        mime="application/zip",
-        use_container_width=True,
-        key="download_all_files"
-    )
+                    if response.status_code != 200:
 
+                        try:
 
-    if st.session_state.processed_target:
+                            error_detail = (
+                                response.json()
+                                .get(
+                                    "detail",
+                                    "Unknown API error"
+                                )
+                            )
 
-        st.info(
-            f"Processed target: "
-            f"**{st.session_state.processed_target}**"
-        )
+                        except Exception:
 
+                            error_detail = response.text
 
-# ==========================================================
-# PROCESSED DATA PREVIEW
-# ==========================================================
-
-if st.session_state.processed:
-
-    if st.session_state.x_train_bytes is not None:
-
-        try:
-
-            x_train_preview = pd.read_csv(
-                io.BytesIO(
-                    st.session_state.x_train_bytes
-                )
-            )
-
-
-            st.divider()
-
-            st.subheader(
-                "🔍 Processed Dataset Preview"
-            )
-
-            st.caption(
-                "Preview of the processed training output."
-            )
-
-
-            col1, col2, col3, col4 = (
-                st.columns(4)
-            )
-
-
-            with col1:
-
-                st.metric(
-                    "Training Rows",
-                    f"{x_train_preview.shape[0]:,}"
-                )
-
-
-            with col2:
-
-                if st.session_state.x_test_bytes is not None:
-
-                    x_test_temp = pd.read_csv(
-                        io.BytesIO(
-                            st.session_state.x_test_bytes
+                        st.error(
+                            f"Processing failed: "
+                            f"{error_detail}"
                         )
+
+                        st.stop()
+
+                    # --------------------------------------
+                    # Store ZIP
+                    # --------------------------------------
+
+                    st.session_state.zip_bytes = (
+                        response.content
                     )
 
-                    st.metric(
-                        "Test Rows",
-                        f"{x_test_temp.shape[0]:,}"
+                    # --------------------------------------
+                    # Read processed output
+                    # --------------------------------------
+
+                    with zipfile.ZipFile(
+                        io.BytesIO(
+                            response.content
+                        ),
+                        "r"
+                    ) as zip_file:
+
+                        files_in_zip = (
+                            zip_file.namelist()
+                        )
+
+                        if "X_processed.csv" in files_in_zip:
+
+                            st.session_state.x_train_bytes = (
+                                zip_file.read(
+                                    "X_processed.csv"
+                                )
+                            )
+
+                        else:
+
+                            st.session_state.x_train_bytes = None
+
+                        if "pipeline_info.txt" in files_in_zip:
+
+                            st.session_state.pipeline_info_bytes = (
+                                zip_file.read(
+                                    "pipeline_info.txt"
+                                )
+                            )
+
+                        else:
+
+                            st.session_state.pipeline_info_bytes = None
+
+                        st.session_state.x_test_bytes = None
+
+                    st.session_state.processed = True
+
+                    st.session_state.processed_target = None
+
+                    st.session_state.processed_dataset_type = (
+                        "Unsupervised Dataset"
                     )
 
-                else:
-
-                    st.metric(
-                        "Test Rows",
-                        "N/A"
+                    st.success(
+                        "✅ Unsupervised dataset processed successfully!"
                     )
 
+            except requests.exceptions.ConnectionError:
 
-            with col3:
-
-                st.metric(
-                    "Output Features",
-                    x_train_preview.shape[1]
+                st.error(
+                    "Could not connect to the preprocessing API."
                 )
 
+            except requests.exceptions.Timeout:
 
-            with col4:
-
-                st.metric(
-                    "Missing Values",
-                    int(
-                        x_train_preview
-                        .isnull()
-                        .sum()
-                        .sum()
-                    )
+                st.error(
+                    "The request timed out."
                 )
 
+            except Exception as e:
 
-            st.dataframe(
-                x_train_preview.head(20),
-                use_container_width=True
-            )
-
-
-        except Exception:
-
-            pass
-
-
-    if st.session_state.x_test_bytes is not None:
-
-        try:
-
-            x_test_preview = pd.read_csv(
-                io.BytesIO(
-                    st.session_state.x_test_bytes
+                st.error(
+                    f"An unexpected error occurred: "
+                    f"{str(e)}"
                 )
-            )
 
+            finally:
 
-            st.subheader(
-                "🔍 Processed Test Dataset Preview"
-            )
-
-            st.caption(
-                "Preview of the processed test output."
-            )
-
-
-            st.dataframe(
-                x_test_preview.head(20),
-                use_container_width=True
-            )
-
-
-        except Exception:
-
-            pass
-
-
-# ==========================================================
-# FOOTER
-# ==========================================================
-
-render_html(
-    """
-<div class="footer">
-
-    Auto ML Preprocessor · Automated EDA ·
-    Feature Engineering · Feature Selection
-
-</div>
-"""
-)
+                st.session_state.processing_running = False
