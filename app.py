@@ -2499,112 +2499,136 @@ if st.session_state.processed:
                     "🔍 Processed Dataset Preview"
                 )
 
-                st.caption(
-                    "Preview of the processed unsupervised "
-                    "training and testing outputs."
-                )
+                # Training-only workflows should show ONLY X_train.
+                # Test workflows can show both X_train and X_test.
+                # This also handles Entire Dataset correctly.
+                if (
+                    unsup_train_preview is not None
+                    and
+                    unsup_test_preview is None
+                ):
 
-                train_rows = (
-                    len(unsup_train_preview)
-                    if unsup_train_preview is not None
-                    else 0
-                )
-
-                test_rows = (
-                    len(unsup_test_preview)
-                    if unsup_test_preview is not None
-                    else 0
-                )
-
-                reference_df = (
-                    unsup_train_preview
-                    if unsup_train_preview is not None
-                    else unsup_test_preview
-                )
-
-                output_features = (
-                    reference_df.shape[1]
-                    if reference_df is not None
-                    else 0
-                )
-
-                missing_values = (
-                    int(
-                        reference_df.isnull()
-                        .sum()
-                        .sum()
-                    )
-                    if reference_df is not None
-                    else 0
-                )
-
-                col1, col2, col3, col4 = st.columns(4)
-
-                with col1:
-
-                    st.metric(
-                        "Training Rows",
-                        f"{train_rows:,}"
+                    st.caption(
+                        "Preview of the processed training output."
                     )
 
-                with col2:
+                    col1, col2, col3 = st.columns(3)
 
-                    st.metric(
-                        "Test Rows",
-                        f"{test_rows:,}"
+                    with col1:
+
+                        st.metric(
+                            "Training Rows",
+                            f"{len(unsup_train_preview):,}"
+                        )
+
+                    with col2:
+
+                        st.metric(
+                            "Output Features",
+                            f"{unsup_train_preview.shape[1]:,}"
+                        )
+
+                    with col3:
+
+                        st.metric(
+                            "Missing Values",
+                            f"{int(unsup_train_preview.isnull().sum().sum()):,}"
+                        )
+
+                    st.dataframe(
+                        unsup_train_preview.head(20),
+                        use_container_width=True
                     )
 
-                with col3:
+                elif (
+                    unsup_train_preview is None
+                    and
+                    unsup_test_preview is not None
+                ):
 
-                    st.metric(
-                        "Output Features",
-                        f"{output_features:,}"
+                    st.caption(
+                        "Preview of the processed test output."
                     )
 
-                with col4:
+                    col1, col2, col3 = st.columns(3)
 
-                    st.metric(
-                        "Missing Values",
-                        f"{missing_values:,}"
+                    with col1:
+
+                        st.metric(
+                            "Test Rows",
+                            f"{len(unsup_test_preview):,}"
+                        )
+
+                    with col2:
+
+                        st.metric(
+                            "Output Features",
+                            f"{unsup_test_preview.shape[1]:,}"
+                        )
+
+                    with col3:
+
+                        st.metric(
+                            "Missing Values",
+                            f"{int(unsup_test_preview.isnull().sum().sum()):,}"
+                        )
+
+                    st.dataframe(
+                        unsup_test_preview.head(20),
+                        use_container_width=True
                     )
 
-                train_tab, test_tab = st.tabs(
-                    [
-                        "X_train.csv",
-                        "X_test.csv"
-                    ]
-                )
+                else:
 
-                with train_tab:
+                    col1, col2, col3, col4 = st.columns(4)
 
-                    if unsup_train_preview is not None:
+                    with col1:
+
+                        st.metric(
+                            "Training Rows",
+                            f"{len(unsup_train_preview):,}"
+                        )
+
+                    with col2:
+
+                        st.metric(
+                            "Test Rows",
+                            f"{len(unsup_test_preview):,}"
+                        )
+
+                    with col3:
+
+                        st.metric(
+                            "Output Features",
+                            f"{unsup_train_preview.shape[1]:,}"
+                        )
+
+                    with col4:
+
+                        st.metric(
+                            "Missing Values",
+                            f"{int(unsup_train_preview.isnull().sum().sum()):,}"
+                        )
+
+                    train_tab, test_tab = st.tabs(
+                        [
+                            "X_train.csv",
+                            "X_test.csv"
+                        ]
+                    )
+
+                    with train_tab:
 
                         st.dataframe(
                             unsup_train_preview.head(20),
                             use_container_width=True
                         )
 
-                    else:
-
-                        st.info(
-                            "No processed training dataset "
-                            "was returned."
-                        )
-
-                with test_tab:
-
-                    if unsup_test_preview is not None:
+                    with test_tab:
 
                         st.dataframe(
                             unsup_test_preview.head(20),
                             use_container_width=True
-                        )
-
-                    else:
-
-                        st.info(
-                            "No processed test dataset "
-                            "was returned."
                         )
 
             except Exception as e:
@@ -2623,15 +2647,37 @@ if st.session_state.processed:
         if (
             st.session_state.x_train_bytes
             is not None
+            or
+            st.session_state.x_test_bytes
+            is not None
         ):
 
             try:
 
-                x_train_preview = pd.read_csv(
-                    io.BytesIO(
-                        st.session_state.x_train_bytes
+                x_train_preview = None
+                x_test_preview = None
+
+                if (
+                    st.session_state.x_train_bytes
+                    is not None
+                ):
+
+                    x_train_preview = pd.read_csv(
+                        io.BytesIO(
+                            st.session_state.x_train_bytes
+                        )
                     )
-                )
+
+                if (
+                    st.session_state.x_test_bytes
+                    is not None
+                ):
+
+                    x_test_preview = pd.read_csv(
+                        io.BytesIO(
+                            st.session_state.x_test_bytes
+                        )
+                    )
 
                 st.divider()
 
@@ -2639,100 +2685,165 @@ if st.session_state.processed:
                     "🔍 Processed Dataset Preview"
                 )
 
-                st.caption(
-                    "Preview of the processed training output."
-                )
+                # --------------------------------------------------
+                # TRAINING-ONLY SUPERVISED WORKFLOW
+                # --------------------------------------------------
 
-                col1, col2, col3, col4 = st.columns(4)
+                if (
+                    x_train_preview is not None
+                    and
+                    x_test_preview is None
+                ):
 
-                with col1:
-
-                    st.metric(
-                        "Training Rows",
-                        f"{x_train_preview.shape[0]:,}"
+                    st.caption(
+                        "Preview of the processed training output."
                     )
 
-                with col2:
+                    col1, col2, col3 = st.columns(3)
 
-                    if (
-                        st.session_state.x_test_bytes
-                        is not None
-                    ):
+                    with col1:
 
-                        x_test_preview = pd.read_csv(
-                            io.BytesIO(
-                                st.session_state.x_test_bytes
+                        st.metric(
+                            "Training Rows",
+                            f"{x_train_preview.shape[0]:,}"
+                        )
+
+                    with col2:
+
+                        st.metric(
+                            "Output Features",
+                            x_train_preview.shape[1]
+                        )
+
+                    with col3:
+
+                        st.metric(
+                            "Missing Values",
+                            int(
+                                x_train_preview
+                                .isnull()
+                                .sum()
+                                .sum()
                             )
                         )
-
-                        st.metric(
-                            "Test Rows",
-                            f"{x_test_preview.shape[0]:,}"
-                        )
-
-                    else:
-
-                        st.metric(
-                            "Test Rows",
-                            "N/A"
-                        )
-
-                with col3:
-
-                    st.metric(
-                        "Output Features",
-                        x_train_preview.shape[1]
-                    )
-
-                with col4:
-
-                    st.metric(
-                        "Missing Values",
-                        int(
-                            x_train_preview
-                            .isnull()
-                            .sum()
-                            .sum()
-                        )
-                    )
-
-                train_tab, test_tab = st.tabs(
-                    [
-                        "X_train.csv",
-                        "X_test.csv"
-                    ]
-                )
-
-                with train_tab:
 
                     st.dataframe(
                         x_train_preview.head(20),
                         use_container_width=True
                     )
 
-                with test_tab:
+                # --------------------------------------------------
+                # TEST-ONLY SUPERVISED WORKFLOW
+                # --------------------------------------------------
 
-                    if (
-                        st.session_state.x_test_bytes
-                        is not None
-                    ):
+                elif (
+                    x_train_preview is None
+                    and
+                    x_test_preview is not None
+                ):
 
-                        x_test_preview = pd.read_csv(
-                            io.BytesIO(
-                                st.session_state.x_test_bytes
+                    st.caption(
+                        "Preview of the processed test output."
+                    )
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+
+                        st.metric(
+                            "Test Rows",
+                            f"{x_test_preview.shape[0]:,}"
+                        )
+
+                    with col2:
+
+                        st.metric(
+                            "Output Features",
+                            x_test_preview.shape[1]
+                        )
+
+                    with col3:
+
+                        st.metric(
+                            "Missing Values",
+                            int(
+                                x_test_preview
+                                .isnull()
+                                .sum()
+                                .sum()
                             )
                         )
+
+                    st.dataframe(
+                        x_test_preview.head(20),
+                        use_container_width=True
+                    )
+
+                # --------------------------------------------------
+                # TRAIN + TEST SUPERVISED WORKFLOW
+                # --------------------------------------------------
+
+                else:
+
+                    st.caption(
+                        "Preview of the processed training "
+                        "and testing outputs."
+                    )
+
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+
+                        st.metric(
+                            "Training Rows",
+                            f"{x_train_preview.shape[0]:,}"
+                        )
+
+                    with col2:
+
+                        st.metric(
+                            "Test Rows",
+                            f"{x_test_preview.shape[0]:,}"
+                        )
+
+                    with col3:
+
+                        st.metric(
+                            "Output Features",
+                            x_train_preview.shape[1]
+                        )
+
+                    with col4:
+
+                        st.metric(
+                            "Missing Values",
+                            int(
+                                x_train_preview
+                                .isnull()
+                                .sum()
+                                .sum()
+                            )
+                        )
+
+                    train_tab, test_tab = st.tabs(
+                        [
+                            "X_train.csv",
+                            "X_test.csv"
+                        ]
+                    )
+
+                    with train_tab:
+
+                        st.dataframe(
+                            x_train_preview.head(20),
+                            use_container_width=True
+                        )
+
+                    with test_tab:
 
                         st.dataframe(
                             x_test_preview.head(20),
                             use_container_width=True
-                        )
-
-                    else:
-
-                        st.info(
-                            "No processed test dataset "
-                            "was returned for this workflow."
                         )
 
             except Exception as e:
