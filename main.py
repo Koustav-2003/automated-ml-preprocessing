@@ -48,7 +48,7 @@ def create_eda_report(df, target):
         # EDA settings
         # --------------------------------------------------
 
-        MAX_EDA_ROWS = 5000
+        MAX_EDA_ROWS = 2000
 
         # --------------------------------------------------
         # Sample only for EDA
