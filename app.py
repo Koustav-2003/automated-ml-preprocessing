@@ -25,7 +25,225 @@ API_URL = (
 st.set_page_config(
     page_title="Auto ML Preprocessor",
     page_icon="⚙️",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+
+# ==========================================================
+# CUSTOM UI / CSS
+# ==========================================================
+
+st.markdown(
+    """
+    <style>
+
+    /* =====================================================
+       GLOBAL
+       ===================================================== */
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+        max-width: 1400px;
+    }
+
+    h1, h2, h3 {
+        letter-spacing: -0.5px;
+    }
+
+
+    /* =====================================================
+       HERO
+       ===================================================== */
+
+    .hero {
+        padding: 2.2rem 2.5rem;
+        border-radius: 18px;
+        margin-bottom: 2rem;
+        border: 1px solid rgba(128,128,128,0.20);
+        background: linear-gradient(
+            135deg,
+            rgba(70,70,70,0.10),
+            rgba(100,100,100,0.04)
+        );
+    }
+
+    .hero-title {
+        font-size: 2.65rem;
+        font-weight: 750;
+        margin-bottom: 0.35rem;
+        line-height: 1.15;
+    }
+
+    .hero-title span {
+        font-weight: 800;
+    }
+
+    .hero-subtitle {
+        font-size: 1.18rem;
+        font-weight: 600;
+        margin-bottom: 0.65rem;
+    }
+
+    .hero-description {
+        font-size: 1rem;
+        opacity: 0.78;
+        max-width: 850px;
+        line-height: 1.6;
+        margin-bottom: 1.2rem;
+    }
+
+    .workflow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+        align-items: center;
+        font-size: 0.95rem;
+        font-weight: 600;
+    }
+
+    .workflow-step {
+        padding: 0.45rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid rgba(128,128,128,0.25);
+        background: rgba(128,128,128,0.08);
+    }
+
+    .workflow-arrow {
+        opacity: 0.5;
+    }
+
+
+    /* =====================================================
+       SECTION CARDS
+       ===================================================== */
+
+    .section-card {
+        padding: 1.25rem 1.5rem;
+        border-radius: 14px;
+        border: 1px solid rgba(128,128,128,0.20);
+        margin-bottom: 1rem;
+    }
+
+    .section-card-title {
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin-bottom: 0.3rem;
+    }
+
+    .section-card-description {
+        opacity: 0.7;
+        font-size: 0.92rem;
+    }
+
+
+    /* =====================================================
+       STATUS / INFO CARDS
+       ===================================================== */
+
+    .status-card {
+        padding: 1rem 1.2rem;
+        border-radius: 12px;
+        border: 1px solid rgba(128,128,128,0.20);
+        margin: 0.5rem 0 1rem 0;
+    }
+
+    .status-title {
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+    }
+
+    .status-text {
+        opacity: 0.75;
+        font-size: 0.92rem;
+        line-height: 1.5;
+    }
+
+
+    /* =====================================================
+       DOWNLOAD AREA
+       ===================================================== */
+
+    .download-card {
+        padding: 1.2rem 1.4rem;
+        border-radius: 14px;
+        border: 1px solid rgba(128,128,128,0.20);
+        margin-bottom: 1rem;
+    }
+
+    .download-title {
+        font-size: 1.2rem;
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+    }
+
+    .download-description {
+        opacity: 0.7;
+        font-size: 0.9rem;
+    }
+
+
+    /* =====================================================
+       FOOTER
+       ===================================================== */
+
+    .footer {
+        text-align: center;
+        opacity: 0.5;
+        font-size: 0.85rem;
+        padding-top: 2rem;
+    }
+
+
+    /* =====================================================
+       BUTTONS
+       ===================================================== */
+
+    div.stButton > button {
+        border-radius: 10px;
+        font-weight: 650;
+        min-height: 2.7rem;
+    }
+
+    div.stDownloadButton > button {
+        border-radius: 10px;
+        font-weight: 600;
+        min-height: 2.6rem;
+    }
+
+
+    /* =====================================================
+       FILE UPLOADER
+       ===================================================== */
+
+    [data-testid="stFileUploader"] {
+        border-radius: 14px;
+    }
+
+
+    /* =====================================================
+       METRICS
+       ===================================================== */
+
+    [data-testid="stMetric"] {
+        padding: 0.8rem;
+        border-radius: 12px;
+        border: 1px solid rgba(128,128,128,0.15);
+    }
+
+
+    /* =====================================================
+       EXPANDERS
+       ===================================================== */
+
+    [data-testid="stExpander"] {
+        border-radius: 10px;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 
@@ -78,6 +296,75 @@ def clear_results():
 
     st.session_state.processed_target = None
     st.session_state.processed_dataset_type = None
+
+
+# ==========================================================
+# HERO
+# ==========================================================
+
+st.markdown(
+    """
+    <div class="hero">
+
+        <div class="hero-title">
+            ⚙️ Auto ML Preprocessor
+        </div>
+
+        <div class="hero-subtitle">
+            No more manual EDA. No more repetitive preprocessing.
+        </div>
+
+        <div class="hero-description">
+            Upload your dataset and automatically perform
+            exploratory data analysis, preprocessing,
+            feature engineering, scaling and feature selection —
+            all in one workflow.
+        </div>
+
+        <div class="workflow">
+
+            <div class="workflow-step">
+                📁 Upload
+            </div>
+
+            <div class="workflow-arrow">
+                →
+            </div>
+
+            <div class="workflow-step">
+                📊 Analyze
+            </div>
+
+            <div class="workflow-arrow">
+                →
+            </div>
+
+            <div class="workflow-step">
+                ⚙️ Process
+            </div>
+
+            <div class="workflow-arrow">
+                →
+            </div>
+
+            <div class="workflow-step">
+                ✨ Engineer
+            </div>
+
+            <div class="workflow-arrow">
+                →
+            </div>
+
+            <div class="workflow-step">
+                📥 Download
+            </div>
+
+        </div>
+
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 # ==========================================================
@@ -211,7 +498,7 @@ def render_numerical_analysis(df, feature):
             )
 
     # ------------------------------------------------------
-    # Proper Box Plot
+    # Box Plot
     # ------------------------------------------------------
 
     st.write(
@@ -295,7 +582,7 @@ def render_categorical_analysis(df, feature):
         )
 
     # ------------------------------------------------------
-    # Category Distribution
+    # Distribution
     # ------------------------------------------------------
 
     st.write(
@@ -549,7 +836,7 @@ def render_target_analysis(df, target):
 
 
 # ==========================================================
-# FULL SWEETVIZ REPORT
+# SWEETVIZ REPORT GENERATION
 # ==========================================================
 
 def generate_sweetviz_report(df, target):
@@ -675,6 +962,11 @@ def render_full_eda(df, target_column):
 
     st.subheader(
         "📊 Exploratory Data Analysis"
+    )
+
+    st.caption(
+        "Explore your dataset feature-by-feature before "
+        "running the automated preprocessing pipeline."
     )
 
     # ------------------------------------------------------
@@ -844,26 +1136,25 @@ def render_sweetviz_section(
 
 
 # ==========================================================
-# TITLE
-# ==========================================================
-
-st.title(
-    "⚙️ Auto ML Preprocessor"
-)
-
-st.write(
-    "Upload your dataset and automatically perform "
-    "exploratory data analysis, preprocessing, "
-    "feature engineering, scaling and feature selection."
-)
-
-
-# ==========================================================
 # DATASET TYPE
 # ==========================================================
 
-st.subheader(
-    "📂 What are you uploading?"
+st.markdown(
+    """
+    <div class="section-card">
+
+        <div class="section-card-title">
+            📂 Choose your dataset workflow
+        </div>
+
+        <div class="section-card-description">
+            Tell the application how your data is currently
+            structured so it can apply the correct workflow.
+        </div>
+
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
 dataset_type = st.radio(
@@ -1007,20 +1298,24 @@ if (
         st.stop()
 
     # ------------------------------------------------------
-    # Dataset loaded
+    # Loaded status
     # ------------------------------------------------------
 
     st.success(
         f"Dataset loaded successfully — "
-        f"{df.shape[0]} rows × {df.shape[1]} columns"
+        f"{df.shape[0]:,} rows × {df.shape[1]:,} columns"
     )
 
     # ------------------------------------------------------
-    # Dataset Preview
+    # Preview
     # ------------------------------------------------------
 
     st.subheader(
         "👀 Dataset Preview"
+    )
+
+    st.caption(
+        "Showing the first 20 rows."
     )
 
     st.dataframe(
@@ -1054,14 +1349,14 @@ if (
 
         st.metric(
             "Rows",
-            df.shape[0]
+            f"{df.shape[0]:,}"
         )
 
     with col2:
 
         st.metric(
             "Columns",
-            df.shape[1]
+            f"{df.shape[1]:,}"
         )
 
     with col3:
@@ -1082,24 +1377,25 @@ if (
 
         st.metric(
             "Missing Values",
-            int(
-                df.isnull()
-                .sum()
-                .sum()
-            )
+            f"{int(df.isnull().sum().sum()):,}"
         )
 
-    st.write(
-        f"**Duplicate Rows:** "
-        f"{int(df.duplicated().sum())}"
+    st.caption(
+        f"Duplicate rows: "
+        f"**{int(df.duplicated().sum()):,}**"
     )
 
     # ------------------------------------------------------
-    # Target Selection
+    # Target
     # ------------------------------------------------------
 
     st.subheader(
         "🎯 Target Selection"
+    )
+
+    st.caption(
+        "Select the variable you want the supervised "
+        "learning pipeline to predict."
     )
 
     target_column = st.selectbox(
@@ -1133,10 +1429,21 @@ if (
     )
 
     # ======================================================
-    # PROCESS DATASET
+    # PROCESS
     # ======================================================
 
     st.divider()
+
+    st.subheader(
+        "⚙️ Automated Processing"
+    )
+
+    st.caption(
+        "The pipeline will automatically detect the task, "
+        "split the data when required, fit preprocessing "
+        "on training data, engineer features and perform "
+        "feature selection."
+    )
 
     process_disabled = (
         st.session_state.eda_running
@@ -1200,17 +1507,9 @@ if (
 
                     st.stop()
 
-                # --------------------------------------------------
-                # Store ZIP
-                # --------------------------------------------------
-
                 st.session_state.zip_bytes = (
                     response.content
                 )
-
-                # --------------------------------------------------
-                # Extract Files
-                # --------------------------------------------------
 
                 with zipfile.ZipFile(
                     io.BytesIO(
@@ -1310,7 +1609,7 @@ if (
 ):
 
     # ------------------------------------------------------
-    # Read Training Dataset
+    # Read training
     # ------------------------------------------------------
 
     try:
@@ -1330,7 +1629,7 @@ if (
         st.stop()
 
     # ------------------------------------------------------
-    # Read Test Dataset
+    # Read test
     # ------------------------------------------------------
 
     try:
@@ -1350,33 +1649,41 @@ if (
         st.stop()
 
     # ------------------------------------------------------
-    # Dataset Information
+    # Status
     # ------------------------------------------------------
 
     st.success(
         f"Training dataset loaded — "
-        f"{train_df.shape[0]} rows × "
-        f"{train_df.shape[1]} columns"
+        f"{train_df.shape[0]:,} rows × "
+        f"{train_df.shape[1]:,} columns"
     )
 
     st.success(
         f"Test dataset loaded — "
-        f"{test_df.shape[0]} rows × "
-        f"{test_df.shape[1]} columns"
+        f"{test_df.shape[0]:,} rows × "
+        f"{test_df.shape[1]:,} columns"
     )
 
     # ------------------------------------------------------
     # Preview
     # ------------------------------------------------------
 
+    st.subheader(
+        "👀 Dataset Preview"
+    )
+
     train_tab, test_tab = st.tabs(
         [
-            "👀 Training Dataset Preview",
-            "👀 Test Dataset Preview"
+            "🏋️ Training Dataset",
+            "🧪 Test Dataset"
         ]
     )
 
     with train_tab:
+
+        st.caption(
+            "First 20 rows of the training dataset."
+        )
 
         st.dataframe(
             train_df.head(20),
@@ -1384,6 +1691,10 @@ if (
         )
 
     with test_tab:
+
+        st.caption(
+            "First 20 rows of the test dataset."
+        )
 
         st.dataframe(
             test_df.head(20),
@@ -1398,6 +1709,10 @@ if (
         "🎯 Target Selection"
     )
 
+    st.caption(
+        "The target is selected from the training dataset."
+    )
+
     target_column = st.selectbox(
         "Select Target Column",
         options=train_df.columns,
@@ -1410,7 +1725,7 @@ if (
     )
 
     # ------------------------------------------------------
-    # EDA INFORMATION
+    # EDA Information
     # ------------------------------------------------------
 
     st.info(
@@ -1450,6 +1765,16 @@ if (
     # ======================================================
 
     st.divider()
+
+    st.subheader(
+        "⚙️ Automated Processing"
+    )
+
+    st.caption(
+        "The preprocessing pipeline will be fitted on the "
+        "training dataset and the learned parameters will "
+        "then be applied to the test dataset."
+    )
 
     process_disabled = (
         st.session_state.eda_running
@@ -1621,8 +1946,22 @@ if (
 
     st.divider()
 
-    st.subheader(
-        "📥 Download Results"
+    st.markdown(
+        """
+        <div class="download-card">
+
+            <div class="download-title">
+                📥 Your processed data is ready
+            </div>
+
+            <div class="download-description">
+                Download individual outputs below or grab
+                everything together as a ZIP archive.
+            </div>
+
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
     download_items = []
@@ -1732,13 +2071,17 @@ if st.session_state.processed:
                 "🔍 Processed Dataset Preview"
             )
 
+            st.caption(
+                "Preview of the processed training output."
+            )
+
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
 
                 st.metric(
                     "Training Rows",
-                    x_train_preview.shape[0]
+                    f"{x_train_preview.shape[0]:,}"
                 )
 
             with col2:
@@ -1753,7 +2096,7 @@ if st.session_state.processed:
 
                     st.metric(
                         "Test Rows",
-                        x_test_temp.shape[0]
+                        f"{x_test_temp.shape[0]:,}"
                     )
 
                 else:
@@ -1782,11 +2125,6 @@ if st.session_state.processed:
                     )
                 )
 
-            st.write(
-                "First 20 rows of the processed "
-                "training dataset:"
-            )
-
             st.dataframe(
                 x_train_preview.head(20),
                 use_container_width=True
@@ -1814,9 +2152,8 @@ if st.session_state.processed:
                 "🔍 Processed Test Dataset Preview"
             )
 
-            st.write(
-                "First 20 rows of the processed "
-                "test dataset:"
+            st.caption(
+                "Preview of the processed test output."
             )
 
             st.dataframe(
@@ -1827,3 +2164,18 @@ if st.session_state.processed:
         except Exception:
 
             pass
+
+
+# ==========================================================
+# FOOTER
+# ==========================================================
+
+st.markdown(
+    """
+    <div class="footer">
+        Auto ML Preprocessor · Automated EDA ·
+        Feature Engineering · Feature Selection
+    </div>
+    """,
+    unsafe_allow_html=True
+)
