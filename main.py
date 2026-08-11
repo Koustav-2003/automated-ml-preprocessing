@@ -582,120 +582,509 @@ async def process_dataset(
 
     if ml_task == "Unsupervised Learning":
 
-        if file is None:
+        valid_unsupervised_dataset_types = [
+            "Entire Dataset",
+            "Training Dataset",
+            "Test Dataset"
+        ]
+
+        if dataset_type not in valid_unsupervised_dataset_types:
 
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "A dataset is required "
-                    "for unsupervised learning."
+                    "Invalid unsupervised dataset type. Choose "
+                    "Entire Dataset, Training Dataset, "
+                    "or Test Dataset."
                 )
             )
 
-        df = await read_csv_file(
-            file,
-            "Dataset"
-        )
+        # ==================================================
+        # ENTIRE DATASET
+        # ==================================================
 
-        if df.empty:
+        if dataset_type == "Entire Dataset":
 
-            raise HTTPException(
-                status_code=400,
-                detail="Dataset contains no rows."
+            if file is None:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "A dataset is required "
+                        "for unsupervised learning."
+                    )
+                )
+
+            df = await read_csv_file(
+                file,
+                "Dataset"
             )
 
-        # --------------------------------------------------
-        # Use standalone unsupervised pipeline
-        # --------------------------------------------------
+            if df.empty:
 
-        try:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Dataset contains no rows."
+                )
 
-            result = process_unsupervised_dataset(
-                df=df,
+            # --------------------------------------------------
+            # The standalone unsupervised pipeline performs the
+            # 80/20 split and fits preprocessing ONLY on X_train.
+            # --------------------------------------------------
+
+            try:
+
+                result = process_unsupervised_dataset(
+                    df=df,
+                    test_size=0.20,
+                    random_state=42
+                )
+
+            except Exception as e:
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Unsupervised preprocessing "
+                        f"failed: {str(e)}"
+                    )
+                )
+
+            zip_buffer = io.BytesIO()
+
+            with zipfile.ZipFile(
+                zip_buffer,
+                "w",
+                zipfile.ZIP_DEFLATED
+            ) as zip_file:
+
+                zip_file.writestr(
+                    "X_train.csv",
+                    result["X_train"].to_csv(
+                        index=False
+                    )
+                )
+
+                zip_file.writestr(
+                    "X_test.csv",
+                    result["X_test"].to_csv(
+                        index=False
+                    )
+                )
+
+                zip_file.writestr(
+                    "pipeline_info.txt",
+                    create_pipeline_report(
+                        {
+                            **result["info"],
+                            "dataset_type":
+                                dataset_type,
+                            "rows_processed":
+                                len(df),
+                            "task":
+                                "Unsupervised",
+                            "target":
+                                "None",
+                            "original_feature_count":
+                                result["info"].get(
+                                    "feature_count_before_processing",
+                                    0
+                                ),
+                            "selected_feature_count":
+                                result["info"].get(
+                                    "final_feature_count",
+                                    0
+                                ),
+                            "feature_selection_method":
+                                "None"
+                        }
+                    )
+                )
+
+            zip_buffer.seek(0)
+
+            return StreamingResponse(
+
+                zip_buffer,
+
+                media_type="application/zip",
+
+                headers={
+                    "Content-Disposition":
+                        "attachment; "
+                        "filename="
+                        "processed_unsupervised_dataset.zip"
+                }
+            )
+
+        # ==================================================
+        # TRAINING DATASET
+        # ==================================================
+
+        elif dataset_type == "Training Dataset":
+
+            if file is None:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "A training dataset is required "
+                        "for unsupervised learning."
+                    )
+                )
+
+            train_df = await read_csv_file(
+                file,
+                "Training Dataset"
+            )
+
+            if train_df.empty:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Training dataset contains no rows."
+                    )
+                )
+
+            X_train = train_df.copy()
+
+            # --------------------------------------------------
+            # Fit ONLY on the supplied training dataset.
+            # No split is performed here because the user has
+            # already supplied the training portion.
+            # --------------------------------------------------
+
+            processor = UnsupervisedPreprocessor(
                 test_size=0.20,
                 random_state=42
             )
 
-        except Exception as e:
+            try:
 
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "Unsupervised preprocessing "
-                    f"failed: {str(e)}"
+                X_train_processed, train_ids = (
+                    processor.fit_transform(
+                        X_train
+                    )
                 )
+
+            except Exception as e:
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Unsupervised preprocessing on the "
+                        f"training dataset failed: {str(e)}"
+                    )
+                )
+
+            train_output = X_train_processed.copy()
+
+            if not train_ids.empty:
+
+                train_output = pd.concat(
+                    [
+                        train_ids.reset_index(
+                            drop=True
+                        ),
+
+                        train_output.reset_index(
+                            drop=True
+                        )
+                    ],
+                    axis=1
+                )
+
+            info = processor.get_info()
+
+            info["dataset_type"] = (
+                dataset_type
             )
 
-        # --------------------------------------------------
-        # Return the generated train/test outputs
-        # --------------------------------------------------
-
-        zip_buffer = io.BytesIO()
-
-        with zipfile.ZipFile(
-            zip_buffer,
-            "w",
-            zipfile.ZIP_DEFLATED
-        ) as zip_file:
-
-            zip_file.writestr(
-                "X_train.csv",
-                result["X_train"].to_csv(
-                    index=False
-                )
+            info["rows_processed"] = (
+                len(train_df)
             )
 
-            zip_file.writestr(
-                "X_test.csv",
-                result["X_test"].to_csv(
-                    index=False
-                )
+            info_text = create_pipeline_report(
+                {
+                    **info,
+                    "task":
+                        "Unsupervised",
+                    "target":
+                        "None",
+                    "original_feature_count":
+                        info.get(
+                            "feature_count_before_processing",
+                            0
+                        ),
+                    "selected_feature_count":
+                        info.get(
+                            "final_feature_count",
+                            0
+                        ),
+                    "feature_selection_method":
+                        "None"
+                }
             )
 
-            zip_file.writestr(
-                "pipeline_info.txt",
-                create_pipeline_report(
-                    {
-                        **result["info"],
-                        "dataset_type":
-                            "Unsupervised Dataset",
-                        "rows_processed":
-                            len(df),
-                        "task":
-                            "Unsupervised",
-                        "target":
-                            "None",
-                        "original_feature_count":
-                            result["info"].get(
-                                "feature_count_before_processing",
-                                0
-                            ),
-                        "selected_feature_count":
-                            result["info"].get(
-                                "final_feature_count",
-                                0
-                            ),
-                        "feature_selection_method":
-                            "None"
-                    }
+            zip_buffer = io.BytesIO()
+
+            with zipfile.ZipFile(
+                zip_buffer,
+                "w",
+                zipfile.ZIP_DEFLATED
+            ) as zip_file:
+
+                zip_file.writestr(
+                    "X_train.csv",
+                    train_output.to_csv(
+                        index=False
+                    )
                 )
+
+                zip_file.writestr(
+                    "pipeline_info.txt",
+                    info_text
+                )
+
+            zip_buffer.seek(0)
+
+            return StreamingResponse(
+
+                zip_buffer,
+
+                media_type="application/zip",
+
+                headers={
+                    "Content-Disposition":
+                        "attachment; "
+                        "filename="
+                        "processed_unsupervised_training_dataset.zip"
+                }
             )
 
-        zip_buffer.seek(0)
+        # ==================================================
+        # TEST DATASET
+        # ==================================================
 
-        return StreamingResponse(
+        else:
 
-            zip_buffer,
+            if train_file is None:
 
-            media_type="application/zip",
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "A training dataset is required "
+                        "when processing an unsupervised "
+                        "test dataset."
+                    )
+                )
 
-            headers={
-                "Content-Disposition":
-                    "attachment; "
-                    "filename="
-                    "processed_unsupervised_dataset.zip"
-            }
-        )
+            if test_file is None:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "A test dataset is required "
+                        "for unsupervised learning."
+                    )
+                )
+
+            train_df = await read_csv_file(
+                train_file,
+                "Training Dataset"
+            )
+
+            test_df = await read_csv_file(
+                test_file,
+                "Test Dataset"
+            )
+
+            if train_df.empty:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Training dataset contains no rows."
+                    )
+                )
+
+            if test_df.empty:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Test dataset contains no rows."
+                    )
+                )
+
+            X_train = train_df.copy()
+            X_test = test_df.copy()
+
+            # --------------------------------------------------
+            # Fit ONLY on the supplied training dataset.
+            # The test dataset is transformed using the fitted
+            # training pipeline.
+            # --------------------------------------------------
+
+            processor = UnsupervisedPreprocessor(
+                test_size=0.20,
+                random_state=42
+            )
+
+            try:
+
+                X_train_processed, train_ids = (
+                    processor.fit_transform(
+                        X_train
+                    )
+                )
+
+            except Exception as e:
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Unsupervised preprocessing could "
+                        "not be fitted on the training "
+                        f"dataset: {str(e)}"
+                    )
+                )
+
+            try:
+
+                X_test_processed, test_ids = (
+                    processor.transform(
+                        X_test
+                    )
+                )
+
+            except Exception as e:
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Unsupervised test transformation "
+                        f"failed: {str(e)}"
+                    )
+                )
+
+            # --------------------------------------------------
+            # Add detected ID columns back to both outputs.
+            # --------------------------------------------------
+
+            train_output = (
+                X_train_processed.copy()
+            )
+
+            if not train_ids.empty:
+
+                train_output = pd.concat(
+                    [
+                        train_ids.reset_index(
+                            drop=True
+                        ),
+
+                        train_output.reset_index(
+                            drop=True
+                        )
+                    ],
+                    axis=1
+                )
+
+            test_output = (
+                X_test_processed.copy()
+            )
+
+            if not test_ids.empty:
+
+                test_output = pd.concat(
+                    [
+                        test_ids.reset_index(
+                            drop=True
+                        ),
+
+                        test_output.reset_index(
+                            drop=True
+                        )
+                    ],
+                    axis=1
+                )
+
+            info = processor.get_info()
+
+            info["dataset_type"] = (
+                dataset_type
+            )
+
+            info["rows_processed"] = (
+                len(test_df)
+            )
+
+            info_text = create_pipeline_report(
+                {
+                    **info,
+                    "task":
+                        "Unsupervised",
+                    "target":
+                        "None",
+                    "original_feature_count":
+                        info.get(
+                            "feature_count_before_processing",
+                            0
+                        ),
+                    "selected_feature_count":
+                        info.get(
+                            "final_feature_count",
+                            0
+                        ),
+                    "feature_selection_method":
+                        "None"
+                }
+            )
+
+            zip_buffer = io.BytesIO()
+
+            with zipfile.ZipFile(
+                zip_buffer,
+                "w",
+                zipfile.ZIP_DEFLATED
+            ) as zip_file:
+
+                zip_file.writestr(
+                    "X_train.csv",
+                    train_output.to_csv(
+                        index=False
+                    )
+                )
+
+                zip_file.writestr(
+                    "X_test.csv",
+                    test_output.to_csv(
+                        index=False
+                    )
+                )
+
+                zip_file.writestr(
+                    "pipeline_info.txt",
+                    info_text
+                )
+
+            zip_buffer.seek(0)
+
+            return StreamingResponse(
+
+                zip_buffer,
+
+                media_type="application/zip",
+
+                headers={
+                    "Content-Disposition":
+                        "attachment; "
+                        "filename="
+                        "processed_unsupervised_test_dataset.zip"
+                }
+            )
 
     # ======================================================
     # SUPERVISED VALIDATION

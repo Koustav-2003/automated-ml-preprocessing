@@ -1770,23 +1770,114 @@ if ml_task == "Supervised Learning":
 else:
 
     with st.container(border=True):
-        st.subheader("🔬 Unsupervised Processing")
+
+        st.subheader(
+            "🔬 Unsupervised Processing"
+        )
+
         st.caption(
-            "No target variable is used. The pipeline will "
-            "process the complete feature matrix and prepare "
-            "it for unsupervised learning."
+            "No target variable is used. Choose how your "
+            "unsupervised dataset is structured."
         )
 
 
-    st.info(
-        "🔬 No target variable is used in the unsupervised workflow."
+    # ======================================================
+    # UNSUPERVISED DATASET WORKFLOW
+    # ======================================================
+
+    unsupervised_dataset_type = st.radio(
+        "Select dataset type:",
+        [
+            "Entire Dataset",
+            "Training Dataset",
+            "Test Dataset"
+        ],
+        horizontal=True,
+        key="unsupervised_dataset_type"
     )
 
-    unsupervised_file = st.file_uploader(
-        "📁 Upload your dataset",
-        type=["csv"],
-        key="unsupervised_dataset_upload"
+
+    if (
+        st.session_state.get(
+            "previous_unsupervised_dataset_type"
+        )
+        is not None
+        and
+        st.session_state.previous_unsupervised_dataset_type
+        != unsupervised_dataset_type
+    ):
+
+        clear_results()
+
+
+    st.session_state.previous_unsupervised_dataset_type = (
+        unsupervised_dataset_type
     )
+
+
+    # ======================================================
+    # ENTIRE DATASET
+    # ======================================================
+
+    if (
+        unsupervised_dataset_type
+        == "Entire Dataset"
+    ):
+
+        st.info(
+            "Your complete dataset will be automatically split "
+            "into training and testing sets using an 80/20 split. "
+            "The unsupervised preprocessing pipeline will be "
+            "fitted only on the training data."
+        )
+
+        unsupervised_file = st.file_uploader(
+            "📁 Upload your complete dataset",
+            type=["csv"],
+            key="unsupervised_entire_dataset_upload"
+        )
+
+
+    # ======================================================
+    # TRAINING DATASET
+    # ======================================================
+
+    elif (
+        unsupervised_dataset_type
+        == "Training Dataset"
+    ):
+
+        st.info(
+            "Upload your training dataset. This option is "
+            "available for workflows where the dataset has "
+            "already been split."
+        )
+
+        unsupervised_file = st.file_uploader(
+            "📁 Upload your training dataset",
+            type=["csv"],
+            key="unsupervised_training_dataset_upload"
+        )
+
+
+    # ======================================================
+    # TEST DATASET
+    # ======================================================
+
+    else:
+
+        st.info(
+            "Upload your test dataset. This option is "
+            "available for workflows where the dataset has "
+            "already been split."
+        )
+
+        unsupervised_file = st.file_uploader(
+            "📁 Upload your test dataset",
+            type=["csv"],
+            key="unsupervised_test_dataset_upload"
+        )
+
 
     if unsupervised_file is not None:
 
@@ -1806,11 +1897,13 @@ else:
 
             st.stop()
 
+
         st.success(
             f"Dataset loaded successfully — "
             f"{unsupervised_df.shape[0]:,} rows × "
             f"{unsupervised_df.shape[1]:,} columns"
         )
+
 
         st.subheader(
             "👀 Dataset Preview"
@@ -1821,6 +1914,7 @@ else:
             use_container_width=True
         )
 
+
         numerical_features = [
             column
             for column in unsupervised_df.columns
@@ -1828,6 +1922,7 @@ else:
                 unsupervised_df[column]
             )
         ]
+
 
         categorical_features = [
             column
@@ -1837,7 +1932,9 @@ else:
             )
         ]
 
+
         col1, col2, col3, col4, col5 = st.columns(5)
+
 
         with col1:
 
@@ -1846,12 +1943,14 @@ else:
                 f"{unsupervised_df.shape[0]:,}"
             )
 
+
         with col2:
 
             st.metric(
                 "Columns",
                 f"{unsupervised_df.shape[1]:,}"
             )
+
 
         with col3:
 
@@ -1860,12 +1959,14 @@ else:
                 len(numerical_features)
             )
 
+
         with col4:
 
             st.metric(
                 "Categorical",
                 len(categorical_features)
             )
+
 
         with col5:
 
@@ -1874,10 +1975,12 @@ else:
                 f"{int(unsupervised_df.isnull().sum().sum()):,}"
             )
 
+
         st.caption(
             f"Duplicate rows: "
             f"**{int(unsupervised_df.duplicated().sum()):,}**"
         )
+
 
         # ==================================================
         # EDA
@@ -1887,6 +1990,57 @@ else:
             unsupervised_df,
             unsupervised=True
         )
+
+        # ==================================================
+        # UNSUPERVISED NUMERICAL BOX PLOTS
+        # ==================================================
+
+        with st.expander(
+            f"📦 Numerical Box Plots ({len(numerical_features)})",
+            expanded=False
+        ):
+
+            if numerical_features:
+
+                st.caption(
+                    "Box plots for all numerical features. "
+                    "Expand this section to inspect distributions "
+                    "and potential outliers."
+                )
+
+                for feature in numerical_features:
+
+                    clean_data = (
+                        unsupervised_df[feature]
+                        .dropna()
+                    )
+
+                    if clean_data.empty:
+                        continue
+
+                    fig = px.box(
+                        clean_data,
+                        y=feature,
+                        points="outliers",
+                        title=f"Box Plot - {feature}"
+                    )
+
+                    fig.update_layout(
+                        height=400,
+                        showlegend=False
+                    )
+
+                    st.plotly_chart(
+                        fig,
+                        use_container_width=True
+                    )
+
+            else:
+
+                st.info(
+                    "No numerical features available "
+                    "for box plots."
+                )
 
         # ==================================================
         # SWEETVIZ
@@ -1959,7 +2113,7 @@ else:
                                 "Unsupervised Learning",
 
                             "dataset_type":
-                                "Unsupervised Dataset"
+                                unsupervised_dataset_type
                         },
 
                         timeout=300
