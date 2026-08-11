@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 
 import pandas as pd
 import io
@@ -17,7 +17,7 @@ from pipeline import DataPreprocessor
 app = FastAPI(
     title="Auto Data Preprocessing API",
     description="Automated EDA, feature engineering and feature selection",
-    version="1.0"
+    version="1.1"
 )
 
 
@@ -40,7 +40,35 @@ def root():
 
 def create_eda_report(df, target):
 
+    temp_path = None
+
     try:
+
+        # --------------------------------------------------
+        # EDA settings
+        # --------------------------------------------------
+
+        MAX_EDA_ROWS = 5000
+
+        # --------------------------------------------------
+        # Sample only for EDA
+        #
+        # IMPORTANT:
+        # This does NOT affect preprocessing.
+        # The actual preprocessing still uses the
+        # complete dataset.
+        # --------------------------------------------------
+
+        if len(df) > MAX_EDA_ROWS:
+
+            eda_df = df.sample(
+                n=MAX_EDA_ROWS,
+                random_state=42
+            )
+
+        else:
+
+            eda_df = df.copy()
 
         # --------------------------------------------------
         # Create temporary HTML file
@@ -59,18 +87,24 @@ def create_eda_report(df, target):
         # Generate Sweetviz report
         # --------------------------------------------------
 
-        if target in df.columns:
+        if target in eda_df.columns:
 
             report = sv.analyze(
-                df,
-                target_feat=target
+                eda_df,
+                target_feat=target,
+                pairwise_analysis="off"
             )
 
         else:
 
             report = sv.analyze(
-                df
+                eda_df,
+                pairwise_analysis="off"
             )
+
+        # --------------------------------------------------
+        # Generate HTML
+        # --------------------------------------------------
 
         report.show_html(
             filepath=temp_path,
@@ -79,7 +113,7 @@ def create_eda_report(df, target):
         )
 
         # --------------------------------------------------
-        # Read generated HTML
+        # Read HTML
         # --------------------------------------------------
 
         with open(
@@ -89,33 +123,9 @@ def create_eda_report(df, target):
 
             report_bytes = html_file.read()
 
-        # --------------------------------------------------
-        # Delete temporary file
-        # --------------------------------------------------
-
-        os.remove(
-            temp_path
-        )
-
         return report_bytes
 
     except Exception as e:
-
-        # --------------------------------------------------
-        # Clean temporary file if something failed
-        # --------------------------------------------------
-
-        try:
-
-            if os.path.exists(temp_path):
-
-                os.remove(
-                    temp_path
-                )
-
-        except Exception:
-
-            pass
 
         raise HTTPException(
             status_code=500,
@@ -124,6 +134,130 @@ def create_eda_report(df, target):
                 f"{str(e)}"
             )
         )
+
+    finally:
+
+        # --------------------------------------------------
+        # Remove temporary file
+        # --------------------------------------------------
+
+        if (
+            temp_path is not None
+            and os.path.exists(temp_path)
+        ):
+
+            try:
+
+                os.remove(
+                    temp_path
+                )
+
+            except Exception:
+
+                pass
+
+
+# ==========================================================
+# EDA ENDPOINT
+# ==========================================================
+
+@app.post("/eda")
+async def generate_eda(
+    file: UploadFile = File(...),
+    target: str = Form(...)
+):
+
+    # ------------------------------------------------------
+    # Validate file
+    # ------------------------------------------------------
+
+    if not file.filename.lower().endswith(".csv"):
+
+        raise HTTPException(
+            status_code=400,
+            detail="Only CSV files are supported."
+        )
+
+    # ------------------------------------------------------
+    # Read CSV
+    # ------------------------------------------------------
+
+    try:
+
+        contents = await file.read()
+
+        if not contents:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty."
+            )
+
+        df = pd.read_csv(
+            io.BytesIO(contents)
+        )
+
+    except HTTPException:
+
+        raise
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Could not read CSV: "
+                f"{str(e)}"
+            )
+        )
+
+    # ------------------------------------------------------
+    # Validate dataframe
+    # ------------------------------------------------------
+
+    if df.empty:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded dataset contains no rows."
+        )
+
+    # ------------------------------------------------------
+    # Validate target
+    # ------------------------------------------------------
+
+    if target not in df.columns:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Target column '{target}' "
+                f"not found."
+            )
+        )
+
+    # ------------------------------------------------------
+    # Generate report
+    # ------------------------------------------------------
+
+    eda_report_bytes = create_eda_report(
+        df,
+        target
+    )
+
+    # ------------------------------------------------------
+    # Return HTML
+    # ------------------------------------------------------
+
+    return Response(
+        content=eda_report_bytes,
+        media_type="text/html",
+        headers={
+            "Content-Disposition":
+                "attachment; "
+                "filename=eda_report.html"
+        }
+    )
 
 
 # ==========================================================
@@ -187,8 +321,8 @@ def create_pipeline_report(info):
     )
 
     removed_features = (
-        original_features -
-        selected_features_count
+        original_features
+        - selected_features_count
     )
 
     report.append(
@@ -412,20 +546,27 @@ def create_pipeline_report(info):
 # CSV READER
 # ==========================================================
 
-async def read_csv_file(file, description):
+async def read_csv_file(
+    file,
+    description
+):
 
     if file is None:
 
         raise HTTPException(
             status_code=400,
-            detail=f"{description} was not uploaded."
+            detail=(
+                f"{description} was not uploaded."
+            )
         )
 
     if not file.filename.lower().endswith(".csv"):
 
         raise HTTPException(
             status_code=400,
-            detail=f"{description} must be a CSV file."
+            detail=(
+                f"{description} must be a CSV file."
+            )
         )
 
     try:
@@ -436,7 +577,9 @@ async def read_csv_file(file, description):
 
             raise HTTPException(
                 status_code=400,
-                detail=f"{description} is empty."
+                detail=(
+                    f"{description} is empty."
+                )
             )
 
         df = pd.read_csv(
@@ -447,7 +590,9 @@ async def read_csv_file(file, description):
 
             raise HTTPException(
                 status_code=400,
-                detail=f"{description} contains no data."
+                detail=(
+                    f"{description} contains no data."
+                )
             )
 
         return df
@@ -478,10 +623,10 @@ async def process_dataset(
 
     target: str = Form(...),
 
-    # Used for Entire Dataset / Training Dataset
+    # Entire Dataset / Training Dataset
     file: UploadFile = File(None),
 
-    # Used for Test Dataset
+    # Test Dataset
     train_file: UploadFile = File(None),
 
     test_file: UploadFile = File(None)
@@ -532,15 +677,6 @@ async def process_dataset(
                     f"not found."
                 )
             )
-
-        # --------------------------------------------------
-        # Generate EDA from RAW dataset
-        # --------------------------------------------------
-
-        eda_report_bytes = create_eda_report(
-            df,
-            target
-        )
 
         # --------------------------------------------------
         # Separate X and y
@@ -641,7 +777,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Create train output
+        # Create training output
         # --------------------------------------------------
 
         train_output = (
@@ -653,7 +789,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # Add IDs to train
+        # Add IDs back
         # --------------------------------------------------
 
         train_ids = pd.DataFrame(
@@ -680,10 +816,6 @@ async def process_dataset(
                 axis=1
             )
 
-        # --------------------------------------------------
-        # Add IDs to test
-        # --------------------------------------------------
-
         if not test_ids.empty:
 
             X_test_processed = pd.concat(
@@ -699,7 +831,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Pipeline info
+        # Pipeline information
         # --------------------------------------------------
 
         info = processor.get_info()
@@ -742,11 +874,6 @@ async def process_dataset(
                 info_text
             )
 
-            zip_file.writestr(
-                "eda_report.html",
-                eda_report_bytes
-            )
-
         zip_buffer.seek(0)
 
         return StreamingResponse(
@@ -785,15 +912,6 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Generate EDA from RAW training dataset
-        # --------------------------------------------------
-
-        eda_report_bytes = create_eda_report(
-            df,
-            target
-        )
-
-        # --------------------------------------------------
         # Separate X and y
         # --------------------------------------------------
 
@@ -811,12 +929,8 @@ async def process_dataset(
             target_col=target
         )
 
-        task = processor._detect_task(
-            y_train
-        )
-
         # --------------------------------------------------
-        # Fit on entire uploaded training dataset
+        # Fit on complete training dataset
         # --------------------------------------------------
 
         try:
@@ -879,7 +993,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Pipeline info
+        # Pipeline information
         # --------------------------------------------------
 
         info = processor.get_info()
@@ -892,7 +1006,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # Create ZIP
+        # ZIP
         # --------------------------------------------------
 
         zip_buffer = io.BytesIO()
@@ -915,11 +1029,6 @@ async def process_dataset(
                 info_text
             )
 
-            zip_file.writestr(
-                "eda_report.html",
-                eda_report_bytes
-            )
-
         zip_buffer.seek(0)
 
         return StreamingResponse(
@@ -939,7 +1048,7 @@ async def process_dataset(
     else:
 
         # --------------------------------------------------
-        # Both files are REQUIRED
+        # Both files required
         # --------------------------------------------------
 
         if train_file is None:
@@ -962,7 +1071,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Read both datasets
+        # Read files
         # --------------------------------------------------
 
         train_df = await read_csv_file(
@@ -976,7 +1085,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # Target must exist in TRAIN
+        # Validate target
         # --------------------------------------------------
 
         if target not in train_df.columns:
@@ -990,20 +1099,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Generate EDA from TRAINING dataset
-        #
-        # The test dataset normally does not contain the
-        # target, so the training dataset is used as the
-        # primary EDA source.
-        # --------------------------------------------------
-
-        eda_report_bytes = create_eda_report(
-            train_df,
-            target
-        )
-
-        # --------------------------------------------------
-        # Target should NOT be required in TEST
+        # Separate train
         # --------------------------------------------------
 
         X_train = train_df.drop(
@@ -1017,9 +1113,6 @@ async def process_dataset(
         # --------------------------------------------------
 
         X_test = test_df.copy()
-
-        # If test happens to contain target,
-        # remove it before transformation.
 
         if target in X_test.columns:
 
@@ -1035,12 +1128,8 @@ async def process_dataset(
             target_col=target
         )
 
-        task = processor._detect_task(
-            y_train
-        )
-
         # --------------------------------------------------
-        # FIT ONLY ON TRAINING DATA
+        # FIT ON TRAINING DATA ONLY
         # --------------------------------------------------
 
         try:
@@ -1055,13 +1144,13 @@ async def process_dataset(
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"Pipeline fitting on training "
+                    "Pipeline fitting on training "
                     f"data failed: {str(e)}"
                 )
             )
 
         # --------------------------------------------------
-        # Transform TEST using fitted processor
+        # Transform test
         # --------------------------------------------------
 
         try:
@@ -1083,7 +1172,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Add IDs back
+        # Add IDs
         # --------------------------------------------------
 
         if not test_ids.empty:
@@ -1101,7 +1190,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Pipeline info
+        # Pipeline information
         # --------------------------------------------------
 
         info = processor.get_info()
@@ -1114,7 +1203,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # Create ZIP
+        # ZIP
         # --------------------------------------------------
 
         zip_buffer = io.BytesIO()
@@ -1135,11 +1224,6 @@ async def process_dataset(
             zip_file.writestr(
                 "pipeline_info.txt",
                 info_text
-            )
-
-            zip_file.writestr(
-                "eda_report.html",
-                eda_report_bytes
             )
 
         zip_buffer.seek(0)
