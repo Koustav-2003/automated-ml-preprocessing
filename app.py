@@ -240,69 +240,26 @@ def clear_results():
 # HERO
 # ==========================================================
 
-st.markdown(
-    """
-    <div class="hero">
+# Native Streamlit components are used here instead of a custom
+# HTML hero so the deployed app cannot display the HTML as code.
 
-        <div class="hero-title">
-            ⚙️ Auto ML Preprocessor
-        </div>
+st.title("⚙️ Auto ML Preprocessor")
 
-        <div class="hero-subtitle">
-            No more manual EDA. No more repetitive preprocessing.
-        </div>
+st.markdown("### No more manual EDA. No more repetitive preprocessing.")
 
-        <div class="hero-description">
-            Upload your dataset and automatically perform
-            exploratory data analysis, preprocessing,
-            feature engineering, scaling and feature selection —
-            all in one workflow.
-        </div>
-
-        <div class="workflow">
-
-            <div class="workflow-step">
-                📁 Upload
-            </div>
-
-            <div class="workflow-arrow">
-                →
-            </div>
-
-            <div class="workflow-step">
-                📊 EDA
-            </div>
-
-            <div class="workflow-arrow">
-                →
-            </div>
-
-            <div class="workflow-step">
-                ⚙️ Preprocess
-            </div>
-
-            <div class="workflow-arrow">
-                →
-            </div>
-
-            <div class="workflow-step">
-                🎯 Feature Selection
-            </div>
-
-            <div class="workflow-arrow">
-                →
-            </div>
-
-            <div class="workflow-step">
-                📥 Download
-            </div>
-
-        </div>
-
-    </div>
-    """,
-    unsafe_allow_html=True
+st.write(
+    "Upload your dataset and automatically perform "
+    "exploratory data analysis, preprocessing, "
+    "feature engineering, scaling and feature selection — "
+    "all in one workflow."
 )
+
+st.markdown(
+    "**📁 Upload**  →  **📊 EDA**  →  **⚙️ Preprocess**  →  "
+    "**🎯 Feature Selection**  →  **📥 Download**"
+)
+
+st.divider()
 
 
 # ==========================================================
