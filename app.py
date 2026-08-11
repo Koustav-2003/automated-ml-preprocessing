@@ -245,71 +245,26 @@ def clear_results():
 # HERO
 # ==========================================================
 
+st.title("⚙️ Auto ML Preprocessor")
+
 st.markdown(
-    textwrap.dedent(
-        """
-        <div class="hero">
-
-            <div class="hero-title">
-                ⚙️ Auto ML Preprocessor
-            </div>
-
-            <div class="hero-subtitle">
-                No more manual EDA. No more repetitive preprocessing.
-            </div>
-
-            <div class="hero-description">
-                Upload your dataset and automatically perform
-                exploratory data analysis, preprocessing,
-                feature engineering, scaling and feature selection —
-                all in one workflow.
-            </div>
-
-            <div class="workflow">
-
-                <div class="workflow-step">
-                    📁 Upload
-                </div>
-
-                <div class="workflow-arrow">
-                    →
-                </div>
-
-                <div class="workflow-step">
-                    📊 EDA
-                </div>
-
-                <div class="workflow-arrow">
-                    →
-                </div>
-
-                <div class="workflow-step">
-                    ⚙️ Preprocess
-                </div>
-
-                <div class="workflow-arrow">
-                    →
-                </div>
-
-                <div class="workflow-step">
-                    🎯 Feature Selection
-                </div>
-
-                <div class="workflow-arrow">
-                    →
-                </div>
-
-                <div class="workflow-step">
-                    📥 Download
-                </div>
-
-            </div>
-
-        </div>
-        """
-    ),
-    unsafe_allow_html=True
+    "### No more manual EDA. No more repetitive preprocessing."
 )
+
+st.write(
+    "Upload your dataset and automatically perform "
+    "exploratory data analysis, preprocessing, "
+    "feature engineering, scaling and feature selection — "
+    "all in one workflow."
+)
+
+st.markdown(
+    "**📁 Upload** → **📊 EDA** → **⚙️ Preprocess** → "
+    "**🎯 Feature Selection** → **📥 Download**"
+)
+
+st.divider()
+
 
 
 # ==========================================================
@@ -1090,6 +1045,7 @@ if ml_task == "Supervised Learning":
             "Select how your supervised dataset is structured."
         )
 
+
     dataset_type = st.radio(
         "Select dataset type:",
         [
@@ -1816,10 +1772,11 @@ else:
     with st.container(border=True):
         st.subheader("🔬 Unsupervised Processing")
         st.caption(
-            "No target variable is used. The pipeline will process "
-            "the complete feature matrix and prepare it for "
-            "unsupervised learning."
+            "No target variable is used. The pipeline will "
+            "process the complete feature matrix and prepare "
+            "it for unsupervised learning."
         )
+
 
     st.info(
         "🔬 No target variable is used in the unsupervised workflow."
@@ -2136,6 +2093,7 @@ if (
         st.caption(
             "Your processed outputs are ready to download."
         )
+
 
     # ======================================================
     # UNSUPERVISED DOWNLOAD
