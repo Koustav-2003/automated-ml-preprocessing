@@ -3,9 +3,10 @@ import pandas as pd
 import requests
 import io
 import zipfile
-import sweetviz as sv
 import tempfile
 import os
+import textwrap
+import sweetviz as sv
 import plotly.express as px
 
 
@@ -13,11 +14,13 @@ import plotly.express as px
 # CONFIGURATION
 # ==========================================================
 
-API_URL = "https://automated-ml-preprocessing-api.onrender.com/process"
+API_URL = (
+    "https://automated-ml-preprocessing-api.onrender.com/process"
+)
 
 
 # ==========================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # ==========================================================
 
 st.set_page_config(
@@ -33,140 +36,142 @@ st.set_page_config(
 # ==========================================================
 
 st.markdown(
-    """
-    <style>
+    textwrap.dedent(
+        """
+        <style>
 
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-        max-width: 1400px;
-    }
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+            max-width: 1400px;
+        }
 
-    .hero {
-        padding: 2.4rem 2.6rem;
-        border-radius: 18px;
-        margin-bottom: 2rem;
-        border: 1px solid rgba(128,128,128,0.20);
-        background: linear-gradient(
-            135deg,
-            rgba(70,70,70,0.10),
-            rgba(100,100,100,0.04)
-        );
-    }
+        .hero {
+            padding: 2.4rem 2.6rem;
+            border-radius: 18px;
+            margin-bottom: 2rem;
+            border: 1px solid rgba(128,128,128,0.20);
+            background: linear-gradient(
+                135deg,
+                rgba(70,70,70,0.10),
+                rgba(100,100,100,0.04)
+            );
+        }
 
-    .hero-title {
-        font-size: 2.65rem;
-        font-weight: 750;
-        margin-bottom: 0.4rem;
-        line-height: 1.15;
-    }
+        .hero-title {
+            font-size: 2.65rem;
+            font-weight: 750;
+            margin-bottom: 0.4rem;
+            line-height: 1.15;
+        }
 
-    .hero-subtitle {
-        font-size: 1.18rem;
-        font-weight: 600;
-        margin-bottom: 0.7rem;
-    }
+        .hero-subtitle {
+            font-size: 1.18rem;
+            font-weight: 600;
+            margin-bottom: 0.7rem;
+        }
 
-    .hero-description {
-        font-size: 1rem;
-        opacity: 0.78;
-        max-width: 900px;
-        line-height: 1.6;
-        margin-bottom: 1.25rem;
-    }
+        .hero-description {
+            font-size: 1rem;
+            opacity: 0.78;
+            max-width: 900px;
+            line-height: 1.6;
+            margin-bottom: 1.25rem;
+        }
 
-    .workflow {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.55rem;
-        align-items: center;
-        font-size: 0.95rem;
-        font-weight: 600;
-    }
+        .workflow {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            align-items: center;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
 
-    .workflow-step {
-        padding: 0.45rem 0.8rem;
-        border-radius: 999px;
-        border: 1px solid rgba(128,128,128,0.25);
-        background: rgba(128,128,128,0.08);
-    }
+        .workflow-step {
+            padding: 0.45rem 0.8rem;
+            border-radius: 999px;
+            border: 1px solid rgba(128,128,128,0.25);
+            background: rgba(128,128,128,0.08);
+        }
 
-    .workflow-arrow {
-        opacity: 0.5;
-    }
+        .workflow-arrow {
+            opacity: 0.5;
+        }
 
-    .section-card {
-        padding: 1.25rem 1.5rem;
-        border-radius: 14px;
-        border: 1px solid rgba(128,128,128,0.20);
-        margin-bottom: 1rem;
-    }
+        .section-card {
+            padding: 1.25rem 1.5rem;
+            border-radius: 14px;
+            border: 1px solid rgba(128,128,128,0.20);
+            margin-bottom: 1rem;
+        }
 
-    .section-card-title {
-        font-size: 1.15rem;
-        font-weight: 700;
-        margin-bottom: 0.3rem;
-    }
+        .section-card-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin-bottom: 0.3rem;
+        }
 
-    .section-card-description {
-        opacity: 0.7;
-        font-size: 0.92rem;
-        line-height: 1.5;
-    }
+        .section-card-description {
+            opacity: 0.7;
+            font-size: 0.92rem;
+            line-height: 1.5;
+        }
 
-    .download-card {
-        padding: 1.2rem 1.4rem;
-        border-radius: 14px;
-        border: 1px solid rgba(128,128,128,0.20);
-        margin-bottom: 1rem;
-    }
+        .download-card {
+            padding: 1.2rem 1.4rem;
+            border-radius: 14px;
+            border: 1px solid rgba(128,128,128,0.20);
+            margin-bottom: 1rem;
+        }
 
-    .download-title {
-        font-size: 1.2rem;
-        font-weight: 700;
-        margin-bottom: 0.25rem;
-    }
+        .download-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
 
-    .download-description {
-        opacity: 0.7;
-        font-size: 0.9rem;
-    }
+        .download-description {
+            opacity: 0.7;
+            font-size: 0.9rem;
+        }
 
-    .footer {
-        text-align: center;
-        opacity: 0.5;
-        font-size: 0.85rem;
-        padding-top: 2rem;
-    }
+        .footer {
+            text-align: center;
+            opacity: 0.5;
+            font-size: 0.85rem;
+            padding-top: 2rem;
+        }
 
-    div.stButton > button {
-        border-radius: 10px;
-        font-weight: 650;
-        min-height: 2.7rem;
-    }
+        div.stButton > button {
+            border-radius: 10px;
+            font-weight: 650;
+            min-height: 2.7rem;
+        }
 
-    div.stDownloadButton > button {
-        border-radius: 10px;
-        font-weight: 600;
-        min-height: 2.6rem;
-    }
+        div.stDownloadButton > button {
+            border-radius: 10px;
+            font-weight: 600;
+            min-height: 2.6rem;
+        }
 
-    [data-testid="stFileUploader"] {
-        border-radius: 14px;
-    }
+        [data-testid="stFileUploader"] {
+            border-radius: 14px;
+        }
 
-    [data-testid="stMetric"] {
-        padding: 0.8rem;
-        border-radius: 12px;
-        border: 1px solid rgba(128,128,128,0.15);
-    }
+        [data-testid="stMetric"] {
+            padding: 0.8rem;
+            border-radius: 12px;
+            border: 1px solid rgba(128,128,128,0.15);
+        }
 
-    [data-testid="stExpander"] {
-        border-radius: 10px;
-    }
+        [data-testid="stExpander"] {
+            border-radius: 10px;
+        }
 
-    </style>
-    """,
+        </style>
+        """
+    ),
     unsafe_allow_html=True
 )
 
@@ -213,7 +218,7 @@ for key, value in defaults.items():
 
 
 # ==========================================================
-# CLEAR PREVIOUS RESULTS
+# CLEAR RESULTS
 # ==========================================================
 
 def clear_results():
@@ -240,26 +245,71 @@ def clear_results():
 # HERO
 # ==========================================================
 
-# Native Streamlit components are used here instead of a custom
-# HTML hero so the deployed app cannot display the HTML as code.
-
-st.title("⚙️ Auto ML Preprocessor")
-
-st.markdown("### No more manual EDA. No more repetitive preprocessing.")
-
-st.write(
-    "Upload your dataset and automatically perform "
-    "exploratory data analysis, preprocessing, "
-    "feature engineering, scaling and feature selection — "
-    "all in one workflow."
-)
-
 st.markdown(
-    "**📁 Upload**  →  **📊 EDA**  →  **⚙️ Preprocess**  →  "
-    "**🎯 Feature Selection**  →  **📥 Download**"
-)
+    textwrap.dedent(
+        """
+        <div class="hero">
 
-st.divider()
+            <div class="hero-title">
+                ⚙️ Auto ML Preprocessor
+            </div>
+
+            <div class="hero-subtitle">
+                No more manual EDA. No more repetitive preprocessing.
+            </div>
+
+            <div class="hero-description">
+                Upload your dataset and automatically perform
+                exploratory data analysis, preprocessing,
+                feature engineering, scaling and feature selection —
+                all in one workflow.
+            </div>
+
+            <div class="workflow">
+
+                <div class="workflow-step">
+                    📁 Upload
+                </div>
+
+                <div class="workflow-arrow">
+                    →
+                </div>
+
+                <div class="workflow-step">
+                    📊 EDA
+                </div>
+
+                <div class="workflow-arrow">
+                    →
+                </div>
+
+                <div class="workflow-step">
+                    ⚙️ Preprocess
+                </div>
+
+                <div class="workflow-arrow">
+                    →
+                </div>
+
+                <div class="workflow-step">
+                    🎯 Feature Selection
+                </div>
+
+                <div class="workflow-arrow">
+                    →
+                </div>
+
+                <div class="workflow-step">
+                    📥 Download
+                </div>
+
+            </div>
+
+        </div>
+        """
+    ),
+    unsafe_allow_html=True
+)
 
 
 # ==========================================================
@@ -285,18 +335,21 @@ def render_numerical_analysis(df, feature):
     col1, col2, col3 = st.columns(3)
 
     with col1:
+
         st.metric(
             "Type",
             "Numerical"
         )
 
     with col2:
+
         st.metric(
             "Missing",
             f"{missing_count} ({missing_percentage:.2f}%)"
         )
 
     with col3:
+
         st.metric(
             "Unique Values",
             unique_count
@@ -413,18 +466,21 @@ def render_categorical_analysis(df, feature):
     col1, col2, col3 = st.columns(3)
 
     with col1:
+
         st.metric(
             "Type",
             "Categorical"
         )
 
     with col2:
+
         st.metric(
             "Missing",
             f"{missing_count} ({missing_percentage:.2f}%)"
         )
 
     with col3:
+
         st.metric(
             "Unique Values",
             unique_count
@@ -522,6 +578,7 @@ def render_target_analysis(df, target):
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+
         st.metric(
             "Target Type",
             "Numerical"
@@ -530,6 +587,7 @@ def render_target_analysis(df, target):
         )
 
     with col2:
+
         st.metric(
             "Missing",
             int(
@@ -538,6 +596,7 @@ def render_target_analysis(df, target):
         )
 
     with col3:
+
         st.metric(
             "Unique Values",
             int(
@@ -546,6 +605,7 @@ def render_target_analysis(df, target):
         )
 
     with col4:
+
         st.metric(
             "Rows",
             len(target_data)
@@ -591,7 +651,9 @@ def render_target_analysis(df, target):
 
         with col2:
 
-            clean_target = target_data.dropna()
+            clean_target = (
+                target_data.dropna()
+            )
 
             if not clean_target.empty:
 
@@ -687,32 +749,50 @@ def render_full_eda(
         )
 
     numerical_features = [
+
         column
+
         for column in df.columns
-        if pd.api.types.is_numeric_dtype(
-            df[column]
-        )
-        and (
-            unsupervised
-            or column != target_column
+
+        if (
+            pd.api.types.is_numeric_dtype(
+                df[column]
+            )
+
+            and
+
+            (
+                unsupervised
+                or
+                column != target_column
+            )
         )
     ]
 
     categorical_features = [
+
         column
+
         for column in df.columns
-        if not pd.api.types.is_numeric_dtype(
-            df[column]
-        )
-        and (
-            unsupervised
-            or column != target_column
+
+        if (
+            not pd.api.types.is_numeric_dtype(
+                df[column]
+            )
+
+            and
+
+            (
+                unsupervised
+                or
+                column != target_column
+            )
         )
     ]
 
-    # ------------------------------------------------------
+    # ======================================================
     # NUMERICAL FEATURES
-    # ------------------------------------------------------
+    # ======================================================
 
     with st.expander(
         f"➕ Numerical Features ({len(numerical_features)})",
@@ -739,9 +819,9 @@ def render_full_eda(
                 "No numerical features available."
             )
 
-    # ------------------------------------------------------
+    # ======================================================
     # CATEGORICAL FEATURES
-    # ------------------------------------------------------
+    # ======================================================
 
     with st.expander(
         f"➕ Categorical Features ({len(categorical_features)})",
@@ -770,7 +850,7 @@ def render_full_eda(
 
 
 # ==========================================================
-# SWEETVIZ GENERATION
+# SWEETVIZ REPORT GENERATION
 # ==========================================================
 
 def generate_sweetviz_report(
@@ -838,12 +918,18 @@ def generate_sweetviz_report(
 
         if (
             temp_path is not None
-            and os.path.exists(temp_path)
+            and
+            os.path.exists(temp_path)
         ):
 
             try:
-                os.remove(temp_path)
+
+                os.remove(
+                    temp_path
+                )
+
             except Exception:
+
                 pass
 
 
@@ -880,9 +966,9 @@ def render_sweetviz_section(
 
     st.warning(
         "⚠️ Full report generation can take around "
-        "5 minutes depending on dataset size. "
-        "The preprocessing button will be disabled "
-        "while the report is being generated."
+        "5 minutes depending on dataset size and complexity. "
+        "The preprocessing button will be disabled while "
+        "the report is being generated."
     )
 
     generate_disabled = (
@@ -950,28 +1036,34 @@ def render_sweetviz_section(
 
 
 # ==========================================================
-# LEARNING TYPE
+# LEARNING TYPE CARD
 # ==========================================================
 
 st.markdown(
-    """
-    <div class="section-card">
+    textwrap.dedent(
+        """
+        <div class="section-card">
 
-        <div class="section-card-title">
-            🧠 Choose your learning type
+            <div class="section-card-title">
+                🧠 Choose your learning type
+            </div>
+
+            <div class="section-card-description">
+                Choose supervised learning when your dataset
+                contains a target variable. Choose unsupervised
+                learning when there is no target variable.
+            </div>
+
         </div>
-
-        <div class="section-card-description">
-            Choose supervised learning when your dataset contains
-            a target variable. Choose unsupervised learning when
-            there is no target variable.
-        </div>
-
-    </div>
-    """,
+        """
+    ),
     unsafe_allow_html=True
 )
 
+
+# ==========================================================
+# LEARNING TYPE
+# ==========================================================
 
 ml_task = st.radio(
     "Select learning type:",
@@ -979,7 +1071,8 @@ ml_task = st.radio(
         "Supervised Learning",
         "Unsupervised Learning"
     ],
-    horizontal=True
+    horizontal=True,
+    key="learning_type"
 )
 
 
@@ -1005,19 +1098,21 @@ st.session_state.previous_ml_task = ml_task
 if ml_task == "Supervised Learning":
 
     st.markdown(
-        """
-        <div class="section-card">
+        textwrap.dedent(
+            """
+            <div class="section-card">
 
-            <div class="section-card-title">
-                📂 Choose your dataset workflow
+                <div class="section-card-title">
+                    📂 Choose your dataset workflow
+                </div>
+
+                <div class="section-card-description">
+                    Select how your supervised dataset is structured.
+                </div>
+
             </div>
-
-            <div class="section-card-description">
-                Select how your supervised dataset is structured.
-            </div>
-
-        </div>
-        """,
+            """
+        ),
         unsafe_allow_html=True
     )
 
@@ -1093,7 +1188,8 @@ if ml_task == "Supervised Learning":
         st.info(
             "Upload both the training and test datasets. "
             "The preprocessing pipeline will be fitted on "
-            "the training dataset and then applied to the test dataset."
+            "the training dataset and then applied to the "
+            "test dataset."
         )
 
         uploaded_file = None
@@ -1111,7 +1207,7 @@ if ml_task == "Supervised Learning":
         )
 
     # ======================================================
-    # SINGLE DATASET SUPERVISED WORKFLOW
+    # SINGLE DATASET WORKFLOW
     # ======================================================
 
     if (
@@ -1173,30 +1269,35 @@ if ml_task == "Supervised Learning":
         col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
+
             st.metric(
                 "Rows",
                 f"{df.shape[0]:,}"
             )
 
         with col2:
+
             st.metric(
                 "Columns",
                 f"{df.shape[1]:,}"
             )
 
         with col3:
+
             st.metric(
                 "Numerical",
                 len(numerical_features)
             )
 
         with col4:
+
             st.metric(
                 "Categorical",
                 len(categorical_features)
             )
 
         with col5:
+
             st.metric(
                 "Missing Values",
                 f"{int(df.isnull().sum().sum()):,}"
@@ -1242,7 +1343,7 @@ if ml_task == "Supervised Learning":
         )
 
         # ==================================================
-        # PROCESS
+        # PROCESSING
         # ==================================================
 
         st.divider()
@@ -1400,7 +1501,14 @@ if ml_task == "Supervised Learning":
             except requests.exceptions.Timeout:
 
                 st.error(
-                    "The request timed out."
+                    "The request timed out. The backend may "
+                    "be waking up or the dataset may be too large."
+                )
+
+            except zipfile.BadZipFile:
+
+                st.error(
+                    "The API returned an invalid ZIP file."
                 )
 
             except Exception as e:
@@ -1428,15 +1536,31 @@ if ml_task == "Supervised Learning":
         try:
 
             train_file.seek(0)
-            train_df = pd.read_csv(train_file)
 
-            test_file.seek(0)
-            test_df = pd.read_csv(test_file)
+            train_df = pd.read_csv(
+                train_file
+            )
 
         except Exception as e:
 
             st.error(
-                f"Could not read uploaded datasets: {str(e)}"
+                f"Could not read training dataset: {str(e)}"
+            )
+
+            st.stop()
+
+        try:
+
+            test_file.seek(0)
+
+            test_df = pd.read_csv(
+                test_file
+            )
+
+        except Exception as e:
+
+            st.error(
+                f"Could not read test dataset: {str(e)}"
             )
 
             st.stop()
@@ -1466,12 +1590,20 @@ if ml_task == "Supervised Learning":
 
         with train_tab:
 
+            st.caption(
+                "First 20 rows of the training dataset."
+            )
+
             st.dataframe(
                 train_df.head(20),
                 use_container_width=True
             )
 
         with test_tab:
+
+            st.caption(
+                "First 20 rows of the test dataset."
+            )
 
             st.dataframe(
                 test_df.head(20),
@@ -1486,27 +1618,34 @@ if ml_task == "Supervised Learning":
             "Select Target Column",
             options=train_df.columns,
             index=len(train_df.columns) - 1,
+            help=(
+                "The target is selected from the "
+                "training dataset."
+            ),
             key="test_dataset_target"
         )
 
         st.info(
-            "EDA is performed on the training dataset only. "
-            "The test dataset is kept unseen."
+            "ℹ️ EDA is performed on the **training dataset only**. "
+            "The test dataset is kept unseen because it should "
+            "not influence preprocessing or feature-selection decisions."
         )
 
         render_full_eda(
             train_df,
-            target_column=target_column
+            target_column
         )
 
         render_sweetviz_section(
             train_df,
             target_column,
-            "supervised_test",
+            "test",
             description=(
-                "EDA and Sweetviz are generated using the "
-                "training dataset only. The test dataset "
-                "is kept separate."
+                "The on-screen EDA and Sweetviz report are generated "
+                "using the **training dataset only**. The test dataset "
+                "is kept separate and is only transformed after the "
+                "preprocessing pipeline has been fitted on the "
+                "training data."
             )
         )
 
@@ -1516,7 +1655,13 @@ if ml_task == "Supervised Learning":
             "⚙️ Automated Processing"
         )
 
-        processing_disabled = (
+        st.caption(
+            "The preprocessing pipeline will be fitted on the "
+            "training dataset and the learned parameters will "
+            "then be applied to the test dataset."
+        )
+
+        process_disabled = (
             st.session_state.eda_running
             or
             st.session_state.processing_running
@@ -1526,7 +1671,7 @@ if ml_task == "Supervised Learning":
             "🚀 Process Test Dataset",
             use_container_width=True,
             key="process_test_dataset",
-            disabled=processing_disabled
+            disabled=process_disabled
         ):
 
             st.session_state.processing_running = True
@@ -1542,7 +1687,6 @@ if ml_task == "Supervised Learning":
                     test_file.seek(0)
 
                     response = requests.post(
-
                         API_URL,
 
                         files={
@@ -1672,6 +1816,12 @@ if ml_task == "Supervised Learning":
                     "The request timed out."
                 )
 
+            except zipfile.BadZipFile:
+
+                st.error(
+                    "The API returned an invalid ZIP file."
+                )
+
             except Exception as e:
 
                 st.error(
@@ -1690,32 +1840,29 @@ if ml_task == "Supervised Learning":
 else:
 
     st.markdown(
-        """
-        <div class="section-card">
+        textwrap.dedent(
+            """
+            <div class="section-card">
 
-            <div class="section-card-title">
-                🔬 Unsupervised Dataset
+                <div class="section-card-title">
+                    🔬 Unsupervised Processing
+                </div>
+
+                <div class="section-card-description">
+                    No target variable is used. The pipeline will
+                    process the complete feature matrix and prepare
+                    it for unsupervised learning.
+                </div>
+
             </div>
-
-            <div class="section-card-description">
-                Upload a dataset without a target variable.
-                The application will analyze and preprocess
-                the complete feature matrix without using
-                an output label.
-            </div>
-
-        </div>
-        """,
+            """
+        ),
         unsafe_allow_html=True
     )
 
     st.info(
         "🔬 No target variable is used in the unsupervised workflow."
     )
-
-    # ======================================================
-    # UPLOAD
-    # ======================================================
 
     unsupervised_file = st.file_uploader(
         "📁 Upload your dataset",
@@ -1747,10 +1894,6 @@ else:
             f"{unsupervised_df.shape[1]:,} columns"
         )
 
-        # ==================================================
-        # PREVIEW
-        # ==================================================
-
         st.subheader(
             "👀 Dataset Preview"
         )
@@ -1759,10 +1902,6 @@ else:
             unsupervised_df.head(20),
             use_container_width=True
         )
-
-        # ==================================================
-        # SUMMARY
-        # ==================================================
 
         numerical_features = [
             column
@@ -1783,30 +1922,35 @@ else:
         col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
+
             st.metric(
                 "Rows",
                 f"{unsupervised_df.shape[0]:,}"
             )
 
         with col2:
+
             st.metric(
                 "Columns",
                 f"{unsupervised_df.shape[1]:,}"
             )
 
         with col3:
+
             st.metric(
                 "Numerical",
                 len(numerical_features)
             )
 
         with col4:
+
             st.metric(
                 "Categorical",
                 len(categorical_features)
             )
 
         with col5:
+
             st.metric(
                 "Missing Values",
                 f"{int(unsupervised_df.isnull().sum().sum()):,}"
@@ -1842,7 +1986,7 @@ else:
         )
 
         # ==================================================
-        # PROCESS
+        # PROCESSING
         # ==================================================
 
         st.divider()
@@ -1882,7 +2026,6 @@ else:
                     unsupervised_file.seek(0)
 
                     response = requests.post(
-
                         API_URL,
 
                         files={
@@ -1971,8 +2114,6 @@ else:
 
                                 st.session_state.pipeline_info_bytes = None
 
-                        # Clear supervised outputs
-
                         st.session_state.x_train_bytes = None
                         st.session_state.x_test_bytes = None
 
@@ -2030,19 +2171,21 @@ if (
     st.divider()
 
     st.markdown(
-        """
-        <div class="download-card">
+        textwrap.dedent(
+            """
+            <div class="download-card">
 
-            <div class="download-title">
-                📥 Processed Dataset Ready
+                <div class="download-title">
+                    📥 Processed Dataset Ready
+                </div>
+
+                <div class="download-description">
+                    Your processed outputs are ready to download.
+                </div>
+
             </div>
-
-            <div class="download-description">
-                Your processed outputs are ready to download.
-            </div>
-
-        </div>
-        """,
+            """
+        ),
         unsafe_allow_html=True
     )
 
@@ -2158,7 +2301,7 @@ if (
 
 
 # ==========================================================
-# OUTPUT PREVIEW
+# PROCESSED DATA PREVIEW
 # ==========================================================
 
 if st.session_state.processed:
@@ -2198,24 +2341,28 @@ if st.session_state.processed:
                 col1, col2, col3, col4 = st.columns(4)
 
                 with col1:
+
                     st.metric(
                         "Rows",
                         f"{processed_df.shape[0]:,}"
                     )
 
                 with col2:
+
                     st.metric(
                         "Output Features",
                         f"{processed_df.shape[1]:,}"
                     )
 
                 with col3:
+
                     st.metric(
                         "Missing Values",
                         f"{int(processed_df.isnull().sum().sum()):,}"
                     )
 
                 with col4:
+
                     st.metric(
                         "Duplicate Rows",
                         f"{int(processed_df.duplicated().sum()):,}"
@@ -2257,9 +2404,14 @@ if st.session_state.processed:
                     "🔍 Processed Dataset Preview"
                 )
 
+                st.caption(
+                    "Preview of the processed training output."
+                )
+
                 col1, col2, col3, col4 = st.columns(4)
 
                 with col1:
+
                     st.metric(
                         "Training Rows",
                         f"{x_train_preview.shape[0]:,}"
@@ -2291,12 +2443,14 @@ if st.session_state.processed:
                         )
 
                 with col3:
+
                     st.metric(
                         "Output Features",
                         x_train_preview.shape[1]
                     )
 
                 with col4:
+
                     st.metric(
                         "Missing Values",
                         int(
@@ -2358,11 +2512,13 @@ if st.session_state.processed:
 # ==========================================================
 
 st.markdown(
-    """
-    <div class="footer">
-        Auto ML Preprocessor · Automated EDA ·
-        Feature Engineering · Feature Selection
-    </div>
-    """,
+    textwrap.dedent(
+        """
+        <div class="footer">
+            Auto ML Preprocessor · Automated EDA ·
+            Feature Engineering · Feature Selection
+        </div>
+        """
+    ),
     unsafe_allow_html=True
 )
