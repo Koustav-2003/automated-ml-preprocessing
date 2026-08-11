@@ -1,22 +1,22 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse
 
 import pandas as pd
 import io
 import zipfile
-import tempfile
-import os
-
-import sweetviz as sv
 
 from sklearn.model_selection import train_test_split
 
 from pipeline import DataPreprocessor
 
 
+# ==========================================================
+# APP CONFIGURATION
+# ==========================================================
+
 app = FastAPI(
     title="Auto Data Preprocessing API",
-    description="Automated EDA, feature engineering and feature selection",
+    description="Automated feature engineering and feature selection",
     version="1.1"
 )
 
@@ -35,233 +35,7 @@ def root():
 
 
 # ==========================================================
-# SWEETVIZ EDA REPORT
-# ==========================================================
-
-def create_eda_report(df, target):
-
-    temp_path = None
-
-    try:
-
-        # --------------------------------------------------
-        # EDA settings
-        # --------------------------------------------------
-
-        MAX_EDA_ROWS = 2000
-
-        # --------------------------------------------------
-        # Sample only for EDA
-        #
-        # IMPORTANT:
-        # This does NOT affect preprocessing.
-        # The actual preprocessing still uses the
-        # complete dataset.
-        # --------------------------------------------------
-
-        if len(df) > MAX_EDA_ROWS:
-
-            eda_df = df.sample(
-                n=MAX_EDA_ROWS,
-                random_state=42
-            )
-
-        else:
-
-            eda_df = df.copy()
-
-        # --------------------------------------------------
-        # Create temporary HTML file
-        # --------------------------------------------------
-
-        temp_file = tempfile.NamedTemporaryFile(
-            suffix=".html",
-            delete=False
-        )
-
-        temp_path = temp_file.name
-
-        temp_file.close()
-
-        # --------------------------------------------------
-        # Generate Sweetviz report
-        # --------------------------------------------------
-
-        if target in eda_df.columns:
-
-            report = sv.analyze(
-                eda_df,
-                target_feat=target,
-                pairwise_analysis="off"
-            )
-
-        else:
-
-            report = sv.analyze(
-                eda_df,
-                pairwise_analysis="off"
-            )
-
-        # --------------------------------------------------
-        # Generate HTML
-        # --------------------------------------------------
-
-        report.show_html(
-            filepath=temp_path,
-            open_browser=False,
-            layout="widescreen"
-        )
-
-        # --------------------------------------------------
-        # Read HTML
-        # --------------------------------------------------
-
-        with open(
-            temp_path,
-            "rb"
-        ) as html_file:
-
-            report_bytes = html_file.read()
-
-        return report_bytes
-
-    except Exception as e:
-
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                f"EDA report generation failed: "
-                f"{str(e)}"
-            )
-        )
-
-    finally:
-
-        # --------------------------------------------------
-        # Remove temporary file
-        # --------------------------------------------------
-
-        if (
-            temp_path is not None
-            and os.path.exists(temp_path)
-        ):
-
-            try:
-
-                os.remove(
-                    temp_path
-                )
-
-            except Exception:
-
-                pass
-
-
-# ==========================================================
-# EDA ENDPOINT
-# ==========================================================
-
-@app.post("/eda")
-async def generate_eda(
-    file: UploadFile = File(...),
-    target: str = Form(...)
-):
-
-    # ------------------------------------------------------
-    # Validate file
-    # ------------------------------------------------------
-
-    if not file.filename.lower().endswith(".csv"):
-
-        raise HTTPException(
-            status_code=400,
-            detail="Only CSV files are supported."
-        )
-
-    # ------------------------------------------------------
-    # Read CSV
-    # ------------------------------------------------------
-
-    try:
-
-        contents = await file.read()
-
-        if not contents:
-
-            raise HTTPException(
-                status_code=400,
-                detail="Uploaded file is empty."
-            )
-
-        df = pd.read_csv(
-            io.BytesIO(contents)
-        )
-
-    except HTTPException:
-
-        raise
-
-    except Exception as e:
-
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Could not read CSV: "
-                f"{str(e)}"
-            )
-        )
-
-    # ------------------------------------------------------
-    # Validate dataframe
-    # ------------------------------------------------------
-
-    if df.empty:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Uploaded dataset contains no rows."
-        )
-
-    # ------------------------------------------------------
-    # Validate target
-    # ------------------------------------------------------
-
-    if target not in df.columns:
-
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Target column '{target}' "
-                f"not found."
-            )
-        )
-
-    # ------------------------------------------------------
-    # Generate report
-    # ------------------------------------------------------
-
-    eda_report_bytes = create_eda_report(
-        df,
-        target
-    )
-
-    # ------------------------------------------------------
-    # Return HTML
-    # ------------------------------------------------------
-
-    return Response(
-        content=eda_report_bytes,
-        media_type="text/html",
-        headers={
-            "Content-Disposition":
-                "attachment; "
-                "filename=eda_report.html"
-        }
-    )
-
-
-# ==========================================================
-# PIPELINE INFO REPORT
+# PIPELINE INFORMATION FORMATTER
 # ==========================================================
 
 def create_pipeline_report(info):
@@ -275,7 +49,7 @@ def create_pipeline_report(info):
     report.append("=" * 70)
 
     # ------------------------------------------------------
-    # GENERAL INFORMATION
+    # General Information
     # ------------------------------------------------------
 
     report.append("")
@@ -283,27 +57,27 @@ def create_pipeline_report(info):
     report.append("-" * 70)
 
     report.append(
-        f"Dataset Type            : "
+        f"Dataset Type       : "
         f"{info.get('dataset_type', 'Unknown')}"
     )
 
     report.append(
-        f"Task                    : "
+        f"Task               : "
         f"{str(info.get('task', 'Unknown')).title()}"
     )
 
     report.append(
-        f"Target Column           : "
+        f"Target Column      : "
         f"{info.get('target', 'Unknown')}"
     )
 
     report.append(
-        f"Rows Processed          : "
+        f"Rows Processed     : "
         f"{info.get('rows_processed', 'Unknown')}"
     )
 
     # ------------------------------------------------------
-    # FEATURE SUMMARY
+    # Feature Summary
     # ------------------------------------------------------
 
     report.append("")
@@ -312,17 +86,12 @@ def create_pipeline_report(info):
 
     original_features = info.get(
         "original_feature_count",
-        0
+        "Unknown"
     )
 
     selected_features_count = info.get(
         "selected_feature_count",
-        0
-    )
-
-    removed_features = (
-        original_features
-        - selected_features_count
+        "Unknown"
     )
 
     report.append(
@@ -335,13 +104,19 @@ def create_pipeline_report(info):
         f"{selected_features_count}"
     )
 
-    report.append(
-        f"Features Removed          : "
-        f"{removed_features}"
-    )
+    if (
+        isinstance(original_features, int)
+        and
+        isinstance(selected_features_count, int)
+    ):
+
+        report.append(
+            f"Features Removed          : "
+            f"{original_features - selected_features_count}"
+        )
 
     # ------------------------------------------------------
-    # ID COLUMNS
+    # ID Columns
     # ------------------------------------------------------
 
     report.append("")
@@ -368,7 +143,7 @@ def create_pipeline_report(info):
         )
 
     # ------------------------------------------------------
-    # MISSING VALUES
+    # Missing Values
     # ------------------------------------------------------
 
     report.append("")
@@ -390,49 +165,47 @@ def create_pipeline_report(info):
         []
     )
 
-    if not missing_features:
+    if missing_features:
 
         report.append(
-            "  No missing values detected."
-        )
-
-    else:
-
-        report.append(
-            f"  Total features with missing values : "
+            f"Features with missing values : "
             f"{len(missing_features)}"
         )
 
-        report.append("")
-
         if numeric_missing:
 
+            report.append("")
             report.append(
-                "  Numerical features:"
+                "Numerical Features:"
             )
 
             for column in numeric_missing:
 
                 report.append(
-                    f"    • {column}"
+                    f"  • {column}"
                 )
 
         if categorical_missing:
 
             report.append("")
-
             report.append(
-                "  Categorical features:"
+                "Categorical Features:"
             )
 
             for column in categorical_missing:
 
                 report.append(
-                    f"    • {column}"
+                    f"  • {column}"
                 )
 
+    else:
+
+        report.append(
+            "No missing values detected."
+        )
+
     # ------------------------------------------------------
-    # SKEWNESS
+    # Skewness
     # ------------------------------------------------------
 
     report.append("")
@@ -447,7 +220,7 @@ def create_pipeline_report(info):
     if skewed_features:
 
         report.append(
-            f"  Features transformed : "
+            f"Features transformed : "
             f"{len(skewed_features)}"
         )
 
@@ -456,17 +229,17 @@ def create_pipeline_report(info):
         for column in skewed_features:
 
             report.append(
-                f"    • {column}"
+                f"  • {column}"
             )
 
     else:
 
         report.append(
-            "  No significantly skewed features detected."
+            "No significantly skewed features detected."
         )
 
     # ------------------------------------------------------
-    # SCALING
+    # Scaling
     # ------------------------------------------------------
 
     report.append("")
@@ -478,13 +251,21 @@ def create_pipeline_report(info):
         []
     )
 
-    report.append(
-        f"  Features scaled : "
-        f"{len(scaled_features)}"
-    )
+    if scaled_features:
+
+        report.append(
+            f"Features scaled : "
+            f"{len(scaled_features)}"
+        )
+
+    else:
+
+        report.append(
+            "No features were scaled."
+        )
 
     # ------------------------------------------------------
-    # FEATURE SELECTION
+    # Feature Selection
     # ------------------------------------------------------
 
     report.append("")
@@ -492,12 +273,7 @@ def create_pipeline_report(info):
     report.append("-" * 70)
 
     report.append(
-        "  Method : L1-based feature selection"
-    )
-
-    report.append(
-        f"  Features retained : "
-        f"{selected_features_count}"
+        "Method : L1-based feature selection"
     )
 
     selected_features = info.get(
@@ -505,12 +281,16 @@ def create_pipeline_report(info):
         []
     )
 
-    report.append("")
-
     if selected_features:
 
         report.append(
-            "  Selected Features:"
+            f"Features retained : "
+            f"{len(selected_features)}"
+        )
+
+        report.append("")
+        report.append(
+            "Selected Features:"
         )
 
         for number, feature in enumerate(
@@ -519,17 +299,17 @@ def create_pipeline_report(info):
         ):
 
             report.append(
-                f"    {number}. {feature}"
+                f"  {number}. {feature}"
             )
 
     else:
 
         report.append(
-            "  No features selected."
+            "No selected feature list available."
         )
 
     # ------------------------------------------------------
-    # END
+    # End
     # ------------------------------------------------------
 
     report.append("")
@@ -555,18 +335,14 @@ async def read_csv_file(
 
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"{description} was not uploaded."
-            )
+            detail=f"{description} was not uploaded."
         )
 
     if not file.filename.lower().endswith(".csv"):
 
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"{description} must be a CSV file."
-            )
+            detail=f"{description} must be a CSV file."
         )
 
     try:
@@ -577,9 +353,7 @@ async def read_csv_file(
 
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    f"{description} is empty."
-                )
+                detail=f"{description} is empty."
             )
 
         df = pd.read_csv(
@@ -590,9 +364,7 @@ async def read_csv_file(
 
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    f"{description} contains no data."
-                )
+                detail=f"{description} contains no data."
             )
 
         return df
@@ -623,10 +395,10 @@ async def process_dataset(
 
     target: str = Form(...),
 
-    # Entire Dataset / Training Dataset
+    # Used for Entire Dataset / Training Dataset
     file: UploadFile = File(None),
 
-    # Test Dataset
+    # Used for Test Dataset
     train_file: UploadFile = File(None),
 
     test_file: UploadFile = File(None)
@@ -705,7 +477,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # Train/test split
+        # Train/Test Split
         # --------------------------------------------------
 
         if task == "classification":
@@ -732,7 +504,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # FIT ONLY ON TRAIN
+        # Fit Pipeline ONLY on Training Data
         # --------------------------------------------------
 
         try:
@@ -755,7 +527,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Transform test
+        # Transform Test Data
         # --------------------------------------------------
 
         try:
@@ -777,7 +549,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Create training output
+        # Create Training Output
         # --------------------------------------------------
 
         train_output = (
@@ -789,7 +561,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # Add IDs back
+        # Add IDs back to Training Data
         # --------------------------------------------------
 
         train_ids = pd.DataFrame(
@@ -816,6 +588,10 @@ async def process_dataset(
                 axis=1
             )
 
+        # --------------------------------------------------
+        # Add IDs back to Test Data
+        # --------------------------------------------------
+
         if not test_ids.empty:
 
             X_test_processed = pd.concat(
@@ -831,7 +607,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Pipeline information
+        # Pipeline Information
         # --------------------------------------------------
 
         info = processor.get_info()
@@ -875,6 +651,10 @@ async def process_dataset(
             )
 
         zip_buffer.seek(0)
+
+        # --------------------------------------------------
+        # Return ZIP
+        # --------------------------------------------------
 
         return StreamingResponse(
             zip_buffer,
@@ -993,7 +773,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Pipeline information
+        # Pipeline Information
         # --------------------------------------------------
 
         info = processor.get_info()
@@ -1006,7 +786,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # ZIP
+        # Create ZIP
         # --------------------------------------------------
 
         zip_buffer = io.BytesIO()
@@ -1048,7 +828,7 @@ async def process_dataset(
     else:
 
         # --------------------------------------------------
-        # Both files required
+        # Validate files
         # --------------------------------------------------
 
         if train_file is None:
@@ -1071,7 +851,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Read files
+        # Read Training and Test
         # --------------------------------------------------
 
         train_df = await read_csv_file(
@@ -1099,7 +879,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Separate train
+        # Separate Training Data
         # --------------------------------------------------
 
         X_train = train_df.drop(
@@ -1109,10 +889,13 @@ async def process_dataset(
         y_train = train_df[target]
 
         # --------------------------------------------------
-        # Test data
+        # Test Data
         # --------------------------------------------------
 
         X_test = test_df.copy()
+
+        # Test datasets may contain the target
+        # or may not.
 
         if target in X_test.columns:
 
@@ -1121,7 +904,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Create processor
+        # Create Processor
         # --------------------------------------------------
 
         processor = DataPreprocessor(
@@ -1129,7 +912,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # FIT ON TRAINING DATA ONLY
+        # FIT ONLY ON TRAINING DATA
         # --------------------------------------------------
 
         try:
@@ -1150,7 +933,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Transform test
+        # Transform Test
         # --------------------------------------------------
 
         try:
@@ -1190,7 +973,7 @@ async def process_dataset(
             )
 
         # --------------------------------------------------
-        # Pipeline information
+        # Pipeline Information
         # --------------------------------------------------
 
         info = processor.get_info()
@@ -1203,7 +986,7 @@ async def process_dataset(
         )
 
         # --------------------------------------------------
-        # ZIP
+        # Create ZIP
         # --------------------------------------------------
 
         zip_buffer = io.BytesIO()
@@ -1227,6 +1010,10 @@ async def process_dataset(
             )
 
         zip_buffer.seek(0)
+
+        # --------------------------------------------------
+        # Return ZIP
+        # --------------------------------------------------
 
         return StreamingResponse(
             zip_buffer,
