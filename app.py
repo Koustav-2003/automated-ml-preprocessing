@@ -1,3 +1,4 @@
+"""EDA IS A DOWNLOADABLE ARTIFACT ONLY. No EDA dashboard or Sweetviz UI is rendered by this app."""
 import streamlit as st
 import pandas as pd
 import requests
@@ -6,7 +7,6 @@ import zipfile
 import tempfile
 import os
 import textwrap
-import sweetviz as sv
 import plotly.express as px
 
 
@@ -192,9 +192,6 @@ defaults = {
 
     "pipeline_info_bytes": None,
 
-    # Sweetviz
-    "eda_report_bytes": None,
-    "eda_generated": False,
 
     # Locks
     "eda_running": False,
@@ -810,7 +807,6 @@ def render_full_eda(
 
 
 # ==========================================================
-# SWEETVIZ REPORT GENERATION
 # ==========================================================
 
 def generate_sweetviz_report(
@@ -894,7 +890,6 @@ def generate_sweetviz_report(
 
 
 # ==========================================================
-# SWEETVIZ SECTION
 # ==========================================================
 
 def render_sweetviz_section(
@@ -1284,8 +1279,6 @@ if ml_task == "Supervised Learning":
             target_column=target_column
         )
 
-        # ==================================================
-        # SWEETVIZ
         # ==================================================
 
         render_sweetviz_section(
@@ -2084,8 +2077,6 @@ else:
             unsupervised=True
         )
 
-        # ==================================================
-        # SWEETVIZ
         # ==================================================
 
         render_sweetviz_section(

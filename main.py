@@ -1,3 +1,4 @@
+"""EDA IS A DOWNLOADABLE ARTIFACT ONLY. No Sweetviz implementation or EDA page is served by this API."""
 from fastapi import (
     FastAPI,
     UploadFile,
