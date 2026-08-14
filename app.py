@@ -6,7 +6,7 @@ import base64
 from pathlib import Path
 from datetime import datetime
 
-from pipeline_updated import (
+from pipeline import (
     SupervisedPreprocessor,
     UnsupervisedPreprocessor,
     process_supervised_dataset,
