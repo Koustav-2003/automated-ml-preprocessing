@@ -2,49 +2,62 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
-import base64
+import zipfile
+import requests
 from pathlib import Path
 from datetime import datetime
 
-from pipeline import (
-    SupervisedPreprocessor,
-    UnsupervisedPreprocessor,
-    process_supervised_dataset,
-    process_unsupervised_dataset,
-)
+API_URL = "http://localhost:8000/process"
 
 
 # ==========================================================
-# PAGE CONFIG
+# PAGE
 # ==========================================================
 
 st.set_page_config(
-    page_title="Automated ML Data Pipeline",
-    page_icon="🤖",
+    page_title="Auto ML Preprocessor",
+    page_icon="⚙️",
     layout="wide"
 )
 
-st.title("🤖 Automated ML Data Pipeline")
+st.title("⚙️ Auto ML Preprocessor")
 st.caption(
-    "EDA → preprocessing → downloadable processed data"
+    "EDA → preprocessing → feature engineering → feature selection → download"
 )
 
 
 # ==========================================================
-# HELPERS
+# SESSION STATE
 # ==========================================================
 
-def make_download_link(data: bytes, filename: str, label: str):
-    b64 = base64.b64encode(data).decode()
-    return (
-        f'<a href="data:application/octet-stream;base64,{b64}" '
-        f'download="{filename}">{label}</a>'
-    )
+defaults = {
+    "processed": False,
+    "zip_bytes": None,
+    "x_train_bytes": None,
+    "x_test_bytes": None,
+    "pipeline_info_bytes": None,
+    "processed_target": None,
+    "processed_dataset_type": None,
+}
+
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
 
-def dataframe_to_csv_bytes(df):
-    return df.to_csv(index=False).encode("utf-8")
+def clear_results():
+    st.session_state.processed = False
+    st.session_state.zip_bytes = None
+    st.session_state.x_train_bytes = None
+    st.session_state.x_test_bytes = None
+    st.session_state.pipeline_info_bytes = None
+    st.session_state.processed_target = None
+    st.session_state.processed_dataset_type = None
 
+
+# ==========================================================
+# EDA DOCUMENT
+# ==========================================================
 
 def create_eda_document(
     df,
@@ -52,20 +65,11 @@ def create_eda_document(
     task=None,
     title="Exploratory Data Analysis Report"
 ):
-    """
-    Creates a self-contained HTML document for download.
-
-    This intentionally contains tables/statistics rather than web-page
-    visualizations. The user can download/open it as a document.
-    """
-
-    rows, cols = df.shape
-
-    numeric_cols = df.select_dtypes(
+    numeric = df.select_dtypes(
         include=np.number
     ).columns.tolist()
 
-    categorical_cols = df.select_dtypes(
+    categorical = df.select_dtypes(
         exclude=np.number
     ).columns.tolist()
 
@@ -79,73 +83,59 @@ def create_eda_document(
         missing["Missing Count"] / len(df) * 100
     )
 
-    missing = missing.sort_values(
-        "Missing %",
-        ascending=False
-    )
-
     missing = missing[
         missing["Missing Count"] > 0
     ]
 
-    duplicates = int(df.duplicated().sum())
+    numeric_summary = (
+        df[numeric].describe().T
+        if numeric
+        else pd.DataFrame()
+    )
 
-    numeric_summary = pd.DataFrame()
-
-    if numeric_cols:
-        numeric_summary = (
-            df[numeric_cols]
-            .describe()
-            .T
-        )
-
+    if numeric:
         numeric_summary["skewness"] = (
-            df[numeric_cols]
-            .skew()
+            df[numeric].skew()
         )
 
     categorical_summary = pd.DataFrame()
 
-    if categorical_cols:
+    if categorical:
         categorical_summary = pd.DataFrame({
-            "Feature": categorical_cols,
+            "Feature": categorical,
             "Unique Values": [
-                df[col].nunique(dropna=True)
-                for col in categorical_cols
+                df[c].nunique(dropna=True)
+                for c in categorical
             ],
             "Missing Values": [
-                int(df[col].isna().sum())
-                for col in categorical_cols
+                int(df[c].isna().sum())
+                for c in categorical
             ]
         }).sort_values(
             "Unique Values",
             ascending=False
         )
 
-    target_section = ""
+    target_html = ""
 
     if target_col and target_col in df.columns:
-
-        target = df[target_col]
-
-        target_section = f"""
+        target_html = f"""
         <h2>Target Analysis</h2>
         <p><b>Target:</b> {target_col}</p>
-        <p><b>Detected task:</b> {task or "Not specified"}</p>
-        {target.describe().to_frame("Value").to_html()}
+        <p><b>Task:</b> {task or "Not specified"}</p>
+        {df[target_col].describe().to_frame("Value").to_html(
+            border=0,
+            classes="table"
+        )}
         """
 
-    def table_or_message(frame, message):
-        if frame is None or frame.empty:
-            return f"<p>{message}</p>"
+    def table(frame, empty_message):
+        if frame.empty:
+            return f"<p>{empty_message}</p>"
         return frame.to_html(
-            classes="data-table",
-            border=0
+            border=0,
+            classes="table"
         )
-
-    generated = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
 
     html = f"""
 <!DOCTYPE html>
@@ -153,145 +143,67 @@ def create_eda_document(
 <head>
 <meta charset="utf-8">
 <title>{title}</title>
-
 <style>
 body {{
-    font-family: Arial, Helvetica, sans-serif;
+    font-family: Arial, sans-serif;
     margin: 40px;
-    line-height: 1.5;
     color: #222;
 }}
-
-h1 {{
-    margin-bottom: 4px;
-}}
-
+h1 {{ margin-bottom: 4px; }}
 h2 {{
-    margin-top: 32px;
+    margin-top: 30px;
     border-bottom: 1px solid #ddd;
-    padding-bottom: 6px;
+    padding-bottom: 5px;
 }}
-
-.meta {{
-    color: #666;
-    margin-bottom: 24px;
-}}
-
-.data-table {{
+.table {{
     border-collapse: collapse;
     width: 100%;
-    margin: 12px 0 24px 0;
+    margin: 12px 0 24px;
     font-size: 13px;
 }}
-
-.data-table th,
-.data-table td {{
+.table th, .table td {{
     border: 1px solid #ddd;
     padding: 7px;
-    text-align: left;
 }}
-
-.data-table th {{
+.table th {{
     font-weight: bold;
 }}
-
-.summary {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-}}
-
-.card {{
-    border: 1px solid #ddd;
-    padding: 14px;
-    border-radius: 8px;
-}}
-
-code {{
-    background: #f4f4f4;
-    padding: 2px 5px;
+.meta {{
+    color: #666;
 }}
 </style>
 </head>
-
 <body>
 
 <h1>{title}</h1>
-
-<div class="meta">
-Generated: {generated}
-</div>
+<p class="meta">
+Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+</p>
 
 <h2>Dataset Overview</h2>
+<p><b>Rows:</b> {len(df):,}</p>
+<p><b>Columns:</b> {df.shape[1]:,}</p>
+<p><b>Numerical features:</b> {len(numeric):,}</p>
+<p><b>Categorical features:</b> {len(categorical):,}</p>
+<p><b>Duplicate rows:</b> {int(df.duplicated().sum()):,}</p>
 
-<div class="summary">
-
-<div class="card">
-<b>Rows</b><br>
-{rows:,}
-</div>
-
-<div class="card">
-<b>Columns</b><br>
-{cols:,}
-</div>
-
-<div class="card">
-<b>Numerical Features</b><br>
-{len(numeric_cols):,}
-</div>
-
-<div class="card">
-<b>Categorical Features</b><br>
-{len(categorical_cols):,}
-</div>
-
-</div>
-
-<p><b>Duplicate rows:</b> {duplicates:,}</p>
-
-{target_section}
+{target_html}
 
 <h2>Numerical Feature Summary</h2>
-
-{table_or_message(
-    numeric_summary,
-    "No numerical features were detected."
-)}
+{table(numeric_summary, "No numerical features detected.")}
 
 <h2>Missing Values</h2>
-
-{table_or_message(
-    missing,
-    "No missing values were detected."
-)}
+{table(missing, "No missing values detected.")}
 
 <h2>Categorical Feature Summary</h2>
+{table(categorical_summary, "No categorical features detected.")}
 
-{table_or_message(
-    categorical_summary,
-    "No categorical features were detected."
-)}
+<h2>Feature Lists</h2>
+<h3>Numerical</h3>
+<p>{", ".join(numeric) if numeric else "None"}</p>
 
-<h2>Detected Feature Types</h2>
-
-<h3>Numerical Features</h3>
-<p>
-{", ".join(numeric_cols) if numeric_cols else "None"}
-</p>
-
-<h3>Categorical Features</h3>
-<p>
-{", ".join(categorical_cols) if categorical_cols else "None"}
-</p>
-
-<h2>Notes</h2>
-
-<p>
-This report is generated from the uploaded dataset. It contains
-tabular/statistical EDA rather than interactive web-page visualizations.
-The report can be downloaded and opened independently.
-</p>
+<h3>Categorical</h3>
+<p>{", ".join(categorical) if categorical else "None"}</p>
 
 </body>
 </html>
@@ -300,170 +212,193 @@ The report can be downloaded and opened independently.
     return html.encode("utf-8")
 
 
-def get_pipeline_info(processor):
-    try:
-        return processor.get_info()
-    except Exception:
-        return {}
-
-
-def display_pipeline_info(info):
-    if not info:
-        return
-
-    st.subheader("Pipeline Summary")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric(
-            "Original Features",
-            info.get(
-                "original_feature_count",
-                info.get(
-                    "feature_count_before_processing",
-                    "—"
-                )
-            )
-        )
-
-    with col2:
-        st.metric(
-            "After Encoding",
-            info.get(
-                "feature_count_after_encoding",
-                "—"
-            )
-        )
-
-    with col3:
-        st.metric(
-            "Final Features",
-            info.get(
-                "final_feature_count",
-                info.get(
-                    "selected_feature_count",
-                    "—"
-                )
-            )
-        )
-
-    with col4:
-        st.metric(
-            "Task",
-            str(info.get("task", "—")).title()
-        )
-
-    with st.expander("Pipeline details"):
-        st.json(info)
-
-
 # ==========================================================
-# SIDEBAR
+# LEARNING TYPE
 # ==========================================================
 
-st.sidebar.header("Settings")
-
-mode = st.sidebar.radio(
-    "Pipeline mode",
+learning_type = st.radio(
+    "Select learning type:",
     [
-        "Supervised",
-        "Unsupervised"
-    ]
+        "Supervised Learning",
+        "Unsupervised Learning"
+    ],
+    horizontal=True
 )
-
-st.sidebar.info(
-    "EDA visualizations and Sweetviz have been removed. "
-    "Use the downloadable EDA report instead."
-)
-
-
-# ==========================================================
-# UPLOAD
-# ==========================================================
-
-uploaded_file = st.file_uploader(
-    "Upload CSV dataset",
-    type=["csv"]
-)
-
-if uploaded_file is None:
-
-    st.info(
-        "Upload a CSV file to begin."
-    )
-
-    st.stop()
-
-
-# ==========================================================
-# LOAD DATA
-# ==========================================================
-
-try:
-
-    df = pd.read_csv(
-        uploaded_file
-    )
-
-except Exception as e:
-
-    st.error(
-        f"Could not read the CSV: {e}"
-    )
-
-    st.stop()
-
-
-st.success(
-    f"Loaded {uploaded_file.name}"
-)
-
-# Dataset preview only — no web-page visualization.
-st.subheader("Dataset Preview")
-st.dataframe(
-    df.head(20),
-    use_container_width=True
-)
-
-st.write(
-    f"Rows: **{df.shape[0]:,}**  |  "
-    f"Columns: **{df.shape[1]:,}**"
-)
-
-
-# ==========================================================
-# EDA DOCUMENT
-# ==========================================================
 
 st.divider()
-st.header("1. EDA Report")
 
+
+# ==========================================================
+# DATASET WORKFLOW
+# ==========================================================
+
+dataset_type = st.radio(
+    "Select dataset type:",
+    [
+        "Entire Dataset",
+        "Training Dataset",
+        "Test Dataset"
+    ],
+    horizontal=True
+)
+
+if dataset_type == "Entire Dataset":
+
+    st.info(
+        "Upload the complete dataset. The pipeline will "
+        "automatically create training and test data."
+    )
+
+    test_size_percent = st.number_input(
+        "Test dataset size (%)",
+        min_value=1,
+        max_value=99,
+        value=20,
+        step=1
+    )
+
+    uploaded_file = st.file_uploader(
+        "📁 Upload complete dataset",
+        type=["csv"],
+        key=f"entire_{learning_type}"
+    )
+
+    train_file = None
+    test_file = None
+
+elif dataset_type == "Training Dataset":
+
+    st.info(
+        "Upload only the training dataset. "
+        "No additional train/test split will be performed."
+    )
+
+    uploaded_file = st.file_uploader(
+        "📁 Upload training dataset",
+        type=["csv"],
+        key=f"train_{learning_type}"
+    )
+
+    train_file = None
+    test_file = None
+    test_size_percent = 20
+
+else:
+
+    st.info(
+        "Upload BOTH the training and test datasets. "
+        "The pipeline will fit only on training data and "
+        "then transform the test data."
+    )
+
+    uploaded_file = None
+
+    train_file = st.file_uploader(
+        "🏋️ Upload training dataset",
+        type=["csv"],
+        key=f"paired_train_{learning_type}"
+    )
+
+    test_file = st.file_uploader(
+        "🧪 Upload test dataset",
+        type=["csv"],
+        key=f"paired_test_{learning_type}"
+    )
+
+    test_size_percent = 20
+
+
+# ==========================================================
+# LOAD DATA FOR EDA
+# ==========================================================
+
+eda_df = None
 target_col = None
 task = None
 
-if mode == "Supervised":
+if dataset_type in [
+    "Entire Dataset",
+    "Training Dataset"
+] and uploaded_file is not None:
 
-    target_col = st.selectbox(
-        "Select target column",
-        options=df.columns.tolist()
+    try:
+        uploaded_file.seek(0)
+        eda_df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Could not read CSV: {e}")
+        st.stop()
+
+elif (
+    dataset_type == "Test Dataset"
+    and train_file is not None
+):
+
+    try:
+        train_file.seek(0)
+        eda_df = pd.read_csv(train_file)
+    except Exception as e:
+        st.error(f"Could not read training CSV: {e}")
+        st.stop()
+
+
+# ==========================================================
+# DATASET PREVIEW + TARGET
+# ==========================================================
+
+if eda_df is not None:
+
+    st.divider()
+    st.subheader("👀 Dataset Preview")
+
+    st.dataframe(
+        eda_df.head(20),
+        use_container_width=True
     )
 
-    if target_col:
-        y_preview = df[target_col]
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        st.metric("Rows", f"{len(eda_df):,}")
+
+    with c2:
+        st.metric("Columns", f"{eda_df.shape[1]:,}")
+
+    with c3:
+        st.metric(
+            "Numerical",
+            len(
+                eda_df.select_dtypes(
+                    include=np.number
+                ).columns
+            )
+        )
+
+    with c4:
+        st.metric(
+            "Missing Values",
+            f"{int(eda_df.isna().sum().sum()):,}"
+        )
+
+    if learning_type == "Supervised Learning":
+
+        target_col = st.selectbox(
+            "🎯 Select target column",
+            eda_df.columns.tolist(),
+            index=len(eda_df.columns) - 1
+        )
+
+        y = eda_df[target_col]
 
         if (
-            pd.api.types.is_object_dtype(y_preview)
-            or pd.api.types.is_string_dtype(y_preview)
-            or pd.api.types.is_bool_dtype(y_preview)
+            pd.api.types.is_object_dtype(y)
+            or pd.api.types.is_string_dtype(y)
+            or pd.api.types.is_bool_dtype(y)
         ):
             task = "classification"
-
-        elif pd.api.types.is_numeric_dtype(y_preview):
-
+        elif pd.api.types.is_numeric_dtype(y):
             task = (
                 "classification"
-                if y_preview.nunique(dropna=True) <= 20
+                if y.nunique(dropna=True) <= 20
                 else "regression"
             )
 
@@ -472,204 +407,280 @@ if mode == "Supervised":
         )
 
 
-eda_bytes = create_eda_document(
-    df,
-    target_col=target_col,
-    task=task
-)
-
-st.download_button(
-    label="📄 Download EDA Report",
-    data=eda_bytes,
-    file_name=(
-        Path(uploaded_file.name).stem
-        + "_EDA_Report.html"
-    ),
-    mime="text/html"
-)
-
-st.caption(
-    "The EDA report contains statistical tables and dataset diagnostics. "
-    "No Sweetviz or interactive visualizations are embedded in the app."
-)
-
-
 # ==========================================================
-# PROCESSING
+# EDA DOWNLOAD
 # ==========================================================
 
-st.divider()
-st.header("2. Data Preprocessing")
+if eda_df is not None:
 
-if mode == "Supervised":
+    st.divider()
+    st.subheader("📄 EDA Report")
 
-    if not target_col:
-
-        st.warning(
-            "Select a target column."
+    if dataset_type == "Test Dataset":
+        st.caption(
+            "EDA is generated from the training dataset only. "
+            "The test dataset remains unseen."
         )
 
-        st.stop()
+    eda_bytes = create_eda_document(
+        eda_df,
+        target_col=target_col,
+        task=task
+    )
 
-    if st.button(
-        "⚙️ Run Supervised Pipeline",
-        type="primary"
-    ):
-
-        try:
-
-            with st.spinner(
-                "Running supervised preprocessing..."
-            ):
-
-                result = process_supervised_dataset(
-                    df=df,
-                    target_col=target_col,
-                    test_size=0.20,
-                    random_state=42
-                )
-
-            processor = result["processor"]
-            info = result["info"]
-
-            st.success(
-                "Supervised preprocessing completed."
-            )
-
-            display_pipeline_info(info)
-
-            X_train = result["X_train"]
-            X_test = result["X_test"]
-
-            st.subheader("Processed Training Data")
-            st.dataframe(
-                X_train.head(20),
-                use_container_width=True
-            )
-
-            st.subheader("Processed Test Data")
-            st.dataframe(
-                X_test.head(20),
-                use_container_width=True
-            )
-
-            st.download_button(
-                "⬇️ Download Processed Train CSV",
-                data=dataframe_to_csv_bytes(
-                    X_train
-                ),
-                file_name=(
-                    Path(uploaded_file.name).stem
-                    + "_processed_train.csv"
-                ),
-                mime="text/csv"
-            )
-
-            st.download_button(
-                "⬇️ Download Processed Test CSV",
-                data=dataframe_to_csv_bytes(
-                    X_test
-                ),
-                file_name=(
-                    Path(uploaded_file.name).stem
-                    + "_processed_test.csv"
-                ),
-                mime="text/csv"
-            )
-
-        except Exception as e:
-
-            st.error(
-                "Supervised preprocessing failed."
-            )
-
-            st.exception(e)
-
-
-else:
-
-    if st.button(
-        "⚙️ Run Unsupervised Pipeline",
-        type="primary"
-    ):
-
-        try:
-
-            with st.spinner(
-                "Running unsupervised preprocessing..."
-            ):
-
-                result = process_unsupervised_dataset(
-                    df=df,
-                    test_size=0.20,
-                    random_state=42
-                )
-
-            processor = result["processor"]
-            info = result["info"]
-
-            st.success(
-                "Unsupervised preprocessing completed."
-            )
-
-            display_pipeline_info(info)
-
-            X_train = result["X_train"]
-            X_test = result["X_test"]
-
-            st.subheader("Processed Training Data")
-            st.dataframe(
-                X_train.head(20),
-                use_container_width=True
-            )
-
-            st.subheader("Processed Test Data")
-            st.dataframe(
-                X_test.head(20),
-                use_container_width=True
-            )
-
-            st.download_button(
-                "⬇️ Download Processed Train CSV",
-                data=dataframe_to_csv_bytes(
-                    X_train
-                ),
-                file_name=(
-                    Path(uploaded_file.name).stem
-                    + "_processed_train.csv"
-                ),
-                mime="text/csv"
-            )
-
-            st.download_button(
-                "⬇️ Download Processed Test CSV",
-                data=dataframe_to_csv_bytes(
-                    X_test
-                ),
-                file_name=(
-                    Path(uploaded_file.name).stem
-                    + "_processed_test.csv"
-                ),
-                mime="text/csv"
-            )
-
-        except Exception as e:
-
-            st.error(
-                "Unsupervised preprocessing failed."
-            )
-
-            st.exception(e)
+    st.download_button(
+        "⬇️ Download EDA Report",
+        data=eda_bytes,
+        file_name=(
+            Path(
+                train_file.name
+                if dataset_type == "Test Dataset"
+                else uploaded_file.name
+            ).stem
+            + "_EDA_Report.html"
+        ),
+        mime="text/html",
+        use_container_width=True
+    )
 
 
 # ==========================================================
-# FOOTER
+# PROCESS
 # ==========================================================
 
-st.divider()
-
-st.caption(
-    "Automated ML Data Pipeline • "
-    "EDA is delivered as a downloadable document; "
-    "web-page visualizations and Sweetviz are disabled."
+ready = (
+    (
+        dataset_type in [
+            "Entire Dataset",
+            "Training Dataset"
+        ]
+        and uploaded_file is not None
+    )
+    or
+    (
+        dataset_type == "Test Dataset"
+        and train_file is not None
+        and test_file is not None
+    )
 )
+
+if ready:
+
+    st.divider()
+    st.subheader("⚙️ Automated Processing")
+
+    if st.button(
+        "🚀 Process Dataset",
+        type="primary",
+        use_container_width=True
+    ):
+
+        try:
+
+            if dataset_type == "Test Dataset":
+
+                train_file.seek(0)
+                test_file.seek(0)
+
+                files = {
+                    "train_file": (
+                        train_file.name,
+                        train_file,
+                        "text/csv"
+                    ),
+                    "test_file": (
+                        test_file.name,
+                        test_file,
+                        "text/csv"
+                    )
+                }
+
+            else:
+
+                uploaded_file.seek(0)
+
+                files = {
+                    "file": (
+                        uploaded_file.name,
+                        uploaded_file,
+                        "text/csv"
+                    )
+                }
+
+            data = {
+                "ml_task": learning_type,
+                "dataset_type": dataset_type,
+                "test_size": test_size_percent / 100,
+                "random_state": 42
+            }
+
+            if learning_type == "Supervised Learning":
+                data["target"] = target_col
+
+            with st.spinner(
+                "Running preprocessing pipeline..."
+            ):
+
+                response = requests.post(
+                    API_URL,
+                    files=files,
+                    data=data,
+                    timeout=300
+                )
+
+            if response.status_code != 200:
+
+                try:
+                    detail = response.json().get(
+                        "detail",
+                        "Unknown API error"
+                    )
+                except Exception:
+                    detail = response.text
+
+                st.error(
+                    f"Processing failed: {detail}"
+                )
+
+            else:
+
+                st.session_state.zip_bytes = (
+                    response.content
+                )
+
+                with zipfile.ZipFile(
+                    io.BytesIO(response.content),
+                    "r"
+                ) as z:
+
+                    names = z.namelist()
+
+                    st.session_state.x_train_bytes = (
+                        z.read("X_train.csv")
+                        if "X_train.csv" in names
+                        else None
+                    )
+
+                    st.session_state.x_test_bytes = (
+                        z.read("X_test.csv")
+                        if "X_test.csv" in names
+                        else None
+                    )
+
+                    st.session_state.pipeline_info_bytes = (
+                        z.read("pipeline_info.txt")
+                        if "pipeline_info.txt" in names
+                        else None
+                    )
+
+                st.session_state.processed = True
+                st.session_state.processed_target = (
+                    target_col
+                )
+                st.session_state.processed_dataset_type = (
+                    dataset_type
+                )
+
+                st.success(
+                    "✅ Dataset processed successfully!"
+                )
+
+        except requests.exceptions.ConnectionError:
+
+            st.error(
+                "Could not connect to the preprocessing API. "
+                "Start main.py first."
+            )
+
+        except requests.exceptions.Timeout:
+
+            st.error(
+                "The preprocessing request timed out."
+            )
+
+        except zipfile.BadZipFile:
+
+            st.error(
+                "The API returned an invalid ZIP file."
+            )
+
+        except Exception as e:
+
+            st.exception(e)
+
+
+# ==========================================================
+# DOWNLOADS
+# ==========================================================
+
+if st.session_state.processed:
+
+    st.divider()
+    st.subheader("📥 Download Processed Data")
+
+    x_train = st.session_state.x_train_bytes
+    x_test = st.session_state.x_test_bytes
+
+    if x_train is not None:
+
+        st.download_button(
+            "⬇️ Download X_train.csv",
+            data=x_train,
+            file_name="X_train.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    if x_test is not None:
+
+        st.download_button(
+            "⬇️ Download X_test.csv",
+            data=x_test,
+            file_name="X_test.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    if st.session_state.pipeline_info_bytes:
+
+        st.download_button(
+            "📄 Download Pipeline Information",
+            data=st.session_state.pipeline_info_bytes,
+            file_name="pipeline_info.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+
+    if st.session_state.zip_bytes:
+
+        st.download_button(
+            "📦 Download Complete Package",
+            data=st.session_state.zip_bytes,
+            file_name="processed_dataset.zip",
+            mime="application/zip",
+            use_container_width=True
+        )
+
+    st.subheader("🔍 Processed Data Preview")
+
+    if x_train is not None:
+        train_preview = pd.read_csv(
+            io.BytesIO(x_train)
+        )
+
+        st.write("**X_train.csv**")
+        st.dataframe(
+            train_preview.head(20),
+            use_container_width=True
+        )
+
+    if x_test is not None:
+        test_preview = pd.read_csv(
+            io.BytesIO(x_test)
+        )
+
+        st.write("**X_test.csv**")
+        st.dataframe(
+            test_preview.head(20),
+            use_container_width=True
+        )
