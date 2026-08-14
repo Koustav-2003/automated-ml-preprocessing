@@ -7,7 +7,7 @@ import requests
 from pathlib import Path
 from datetime import datetime
 
-API_URL = "http://localhost:8000/process"
+API_URL = "https://automated-ml-preprocessing-api.onrender.com/process"
 
 
 # ==========================================================
