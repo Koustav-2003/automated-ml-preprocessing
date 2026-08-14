@@ -577,10 +577,15 @@ def finish_background_operation():
     return True
 
 
-def render_operation_lock():
-    """Render a persistent operation controller without blocking the main page."""
+def render_operation_lock(expected_kind=None):
+    """Render the operation controller in the section that owns the operation."""
     if not operation_is_running():
         return
+
+    if expected_kind is not None:
+        current_kind = st.session_state.get("operation_kind")
+        if current_kind != expected_kind:
+            return
 
     # Streamlit fragments are important here.  The old implementation used
     # st.rerun() + time.sleep() in the main script, which could prevent the
@@ -666,6 +671,10 @@ def generate_eda_report_download(files, data, key):
     running = bool(st.session_state.get("eda_running", False))
     processed = bool(st.session_state.get("processed", False))
 
+    if running and st.session_state.get("operation_kind") == "eda":
+        render_operation_lock(expected_kind="eda")
+        return
+
     if completed and st.session_state.get("eda_report_bytes") is not None:
         st.success(
             "EDA report generated successfully. The report is ready to download."
@@ -709,15 +718,9 @@ def generate_eda_report_download(files, data, key):
         st.rerun()
 
 
-render_operation_lock()
-
 if st.session_state.operation_error:
     st.error(st.session_state.operation_error)
     st.session_state.operation_error = None
-
-if st.session_state.operation_message:
-    st.success(st.session_state.operation_message)
-    st.session_state.operation_message = None
 
 
 # ==========================================================
@@ -1099,6 +1102,9 @@ if ml_task == "Supervised Learning":
             "engineer features."
         )
 
+        if st.session_state.get("processing_running") and st.session_state.get("operation_kind") == "process":
+            render_operation_lock(expected_kind="process")
+
         processing_disabled = (
             ui_is_locked()
             or st.session_state.processed
@@ -1293,6 +1299,9 @@ if ml_task == "Supervised Learning":
             "training dataset and the learned parameters will "
             "then be applied to the test dataset."
         )
+
+        if st.session_state.get("processing_running") and st.session_state.get("operation_kind") == "process":
+            render_operation_lock(expected_kind="process")
 
         process_disabled = (
             ui_is_locked()
@@ -1707,6 +1716,9 @@ else:
             "process categorical variables, transform skewed "
             "features and scale the resulting feature matrix."
         )
+
+        if st.session_state.get("processing_running") and st.session_state.get("operation_kind") == "process":
+            render_operation_lock(expected_kind="process")
 
         processing_disabled = (
             ui_is_locked()
