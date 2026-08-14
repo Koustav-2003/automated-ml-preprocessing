@@ -520,9 +520,9 @@ def finish_background_operation():
         st.session_state.eda_report_bytes = content
         st.session_state.eda_generated = True
         st.session_state.eda_source_signature = st.session_state.active_input_signature
-        st.session_state.operation_message = (
-            "EDA report generated successfully."
-        )
+        # Do not show a separate global success banner. The EDA section
+        # itself displays the generated-report state and download button.
+        st.session_state.operation_message = None
 
     else:
         try:
@@ -1296,7 +1296,6 @@ if ml_task == "Supervised Learning":
 
         process_disabled = (
             ui_is_locked()
-            or st.session_state.eda_generated
             or st.session_state.processed
         )
 
