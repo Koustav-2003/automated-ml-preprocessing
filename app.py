@@ -618,27 +618,21 @@ def render_operation_lock(expected_kind=None):
         )
 
         with st.container(border=True):
-            status_col, cancel_col = st.columns(
-                [5, 1],
-                vertical_alignment="center"
+            st.warning(label)
+
+            st.caption(
+                "All controls are locked while this operation is running. "
+                "Only Cancel is available."
             )
 
-            with status_col:
-                st.warning(label)
-                st.caption(
-                    "All controls are locked while this operation is running. "
-                    "Only Cancel is available."
-                )
-
-            with cancel_col:
-                if st.button(
-                    "✖ Cancel",
-                    type="primary",
-                    use_container_width=True,
-                    key="cancel_current_operation",
-                ):
-                    cancel_current_operation()
-                    st.rerun(scope="app")
+            if st.button(
+                "✖ Cancel",
+                type="primary",
+                use_container_width=True,
+                key="cancel_current_operation",
+            ):
+                cancel_current_operation()
+                st.rerun(scope="app")
 
         # Check the worker without blocking the page.
         if finish_background_operation():
