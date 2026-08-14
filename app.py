@@ -270,6 +270,10 @@ def operation_is_running():
     )
 
 
+def operation_lock():
+    return operation_is_running()
+
+
 def file_payload(uploaded_file):
     uploaded_file.seek(0)
     content = uploaded_file.getvalue()
@@ -541,33 +545,29 @@ def render_operation_lock():
 
 
 def generate_eda_report_download(files, data, key):
-    """Start the notebook-based EDA report as a cancellable operation."""
+    """Always render EDA control; completed/running states disable it."""
+    completed = st.session_state.eda_generated
+    disabled = operation_is_running() or completed or st.session_state.processed
 
-    disabled = (
-        operation_is_running()
-        or st.session_state.eda_generated
-        or st.session_state.processed
-    )
-
+    label = "📊 EDA Report Generated" if completed else "📊 Generate EDA Report"
     if st.button(
-        "📊 Generate EDA Report",
+        label,
         use_container_width=True,
         key=key,
-        disabled=disabled
+        disabled=disabled,
+        help=(
+            "EDA has already been generated. Upload a new input or choose "
+            "a new workflow to generate another report."
+            if completed else
+            "Optional: EDA may take some time and does not affect preprocessing."
+        )
     ):
         launch_http_operation(
-            "eda",
-            EDA_API_URL,
-            files,
-            data,
-            metadata={"eda_key": key}
+            "eda", EDA_API_URL, files, data, metadata={"eda_key": key}
         )
         st.rerun()
 
-    if (
-        st.session_state.eda_generated
-        and st.session_state.eda_report_bytes is not None
-    ):
+    if completed and st.session_state.eda_report_bytes is not None:
         st.download_button(
             "⬇️ Download EDA Report (HTML)",
             data=st.session_state.eda_report_bytes,
@@ -639,7 +639,8 @@ ml_task = st.radio(
         "Unsupervised Learning"
     ],
     horizontal=True,
-    key="learning_type"
+    key="learning_type",
+    disabled=operation_lock()
 )
 
 
@@ -681,7 +682,8 @@ if ml_task == "Supervised Learning":
             "Test Dataset"
         ],
         horizontal=True,
-        key="supervised_dataset_type"
+        key="supervised_dataset_type",
+        disabled=operation_lock()
     )
 
     if (
@@ -721,13 +723,15 @@ if ml_task == "Supervised Learning":
                 "Percentage of the complete dataset to reserve "
                 "for testing. Default is 20%."
             ),
-            key="supervised_test_size_percent"
+            key="supervised_test_size_percent",
+            disabled=operation_lock()
         )
 
         uploaded_file = st.file_uploader(
             "📁 Upload your complete dataset",
             type=["csv"],
-            key="entire_dataset_upload"
+            key="entire_dataset_upload",
+            disabled=operation_lock()
         )
 
         train_file = None
@@ -748,7 +752,8 @@ if ml_task == "Supervised Learning":
         uploaded_file = st.file_uploader(
             "📁 Upload your training dataset",
             type=["csv"],
-            key="training_dataset_upload"
+            key="training_dataset_upload",
+            disabled=operation_lock()
         )
 
         train_file = None
@@ -772,13 +777,15 @@ if ml_task == "Supervised Learning":
         train_file = st.file_uploader(
             "📁 Upload your training dataset",
             type=["csv"],
-            key="test_mode_train_upload"
+            key="test_mode_train_upload",
+            disabled=operation_lock()
         )
 
         test_file = st.file_uploader(
             "📁 Upload your test dataset",
             type=["csv"],
-            key="test_mode_test_upload"
+            key="test_mode_test_upload",
+            disabled=operation_lock()
         )
 
     # ======================================================
@@ -895,7 +902,8 @@ if ml_task == "Supervised Learning":
             "Select Target Column",
             options=df.columns,
             index=len(df.columns) - 1,
-            key="single_dataset_target"
+            key="single_dataset_target",
+            disabled=operation_lock()
         )
 
         sync_input_signature(
@@ -967,7 +975,7 @@ if ml_task == "Supervised Learning":
         )
 
         if st.button(
-            "🚀 Process Dataset",
+            "🚀 Dataset Processed" if st.session_state.processed else "🚀 Process Dataset",
             use_container_width=True,
             key="process_single_dataset",
             disabled=processing_disabled
@@ -1093,7 +1101,8 @@ if ml_task == "Supervised Learning":
                 "The target is selected from the "
                 "training dataset."
             ),
-            key="test_dataset_target"
+            key="test_dataset_target",
+            disabled=operation_lock()
         )
 
         sync_input_signature(
@@ -1158,7 +1167,7 @@ if ml_task == "Supervised Learning":
         )
 
         if st.button(
-            "🚀 Process Test Dataset",
+            "🚀 Dataset Processed" if st.session_state.processed else "🚀 Process Test Dataset",
             use_container_width=True,
             key="process_test_dataset",
             disabled=process_disabled
@@ -1215,7 +1224,8 @@ else:
             "Test Dataset"
         ],
         horizontal=True,
-        key="unsupervised_dataset_type"
+        key="unsupervised_dataset_type",
+        disabled=operation_lock()
     )
 
 
@@ -1281,13 +1291,15 @@ else:
                 "Percentage of the complete dataset to reserve "
                 "for testing. Default is 20%."
             ),
-            key="unsupervised_test_size_percent"
+            key="unsupervised_test_size_percent",
+            disabled=operation_lock()
         )
 
         unsupervised_file = st.file_uploader(
             "📁 Upload your complete dataset",
             type=["csv"],
-            key="unsupervised_entire_dataset_upload"
+            key="unsupervised_entire_dataset_upload",
+            disabled=operation_lock()
         )
 
 
@@ -1309,7 +1321,8 @@ else:
         unsupervised_file = st.file_uploader(
             "📁 Upload your training dataset",
             type=["csv"],
-            key="unsupervised_training_dataset_upload"
+            key="unsupervised_training_dataset_upload",
+            disabled=operation_lock()
         )
 
 
@@ -1329,13 +1342,15 @@ else:
         unsupervised_train_file = st.file_uploader(
             "📁 Upload your training dataset",
             type=["csv"],
-            key="unsupervised_test_workflow_train_upload"
+            key="unsupervised_test_workflow_train_upload",
+            disabled=operation_lock()
         )
 
         unsupervised_test_file = st.file_uploader(
             "📁 Upload your test dataset",
             type=["csv"],
-            key="unsupervised_test_workflow_test_upload"
+            key="unsupervised_test_workflow_test_upload",
+            disabled=operation_lock()
         )
 
         # Use the training dataset as the dataset displayed in
@@ -1563,7 +1578,7 @@ else:
         )
 
         if st.button(
-            "🚀 Process Unsupervised Dataset",
+            "🚀 Dataset Processed" if st.session_state.processed else "🚀 Process Unsupervised Dataset",
             use_container_width=True,
             key="process_unsupervised_dataset",
             disabled=processing_disabled
