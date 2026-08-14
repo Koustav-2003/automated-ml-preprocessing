@@ -1,13 +1,9 @@
-"""EDA IS A DOWNLOADABLE ARTIFACT ONLY. No EDA dashboard or Sweetviz UI is rendered by this app."""
 import streamlit as st
 import pandas as pd
 import requests
 import io
 import zipfile
-import tempfile
-import os
 import textwrap
-import plotly.express as px
 
 
 # ==========================================================
@@ -15,6 +11,7 @@ import plotly.express as px
 # ==========================================================
 
 API_URL = "https://automated-ml-preprocessing-api.onrender.com/process"
+EDA_API_URL = "https://automated-ml-preprocessing-api.onrender.com/eda"
 
 
 # ==========================================================
@@ -192,9 +189,10 @@ defaults = {
 
     "pipeline_info_bytes": None,
 
+    "eda_report_bytes": None,
+    "eda_generated": False,
 
     # Locks
-    "eda_running": False,
     "processing_running": False,
 
     # Metadata
@@ -243,6 +241,63 @@ def clear_results(clear_uploads=False):
             st.session_state.pop(key, None)
 
 
+
+def generate_eda_report_download(files, data, key):
+    """Request the notebook-based EDA report from the FastAPI backend."""
+
+    if st.button(
+        "📊 Generate EDA Report",
+        use_container_width=True,
+        key=key
+    ):
+        try:
+            response = requests.post(
+                EDA_API_URL,
+                files=files,
+                data=data,
+                timeout=300
+            )
+
+            if response.status_code != 200:
+                try:
+                    detail = response.json().get(
+                        "detail", "Unknown EDA API error"
+                    )
+                except Exception:
+                    detail = response.text
+
+                st.error(
+                    f"EDA report generation failed: {detail}"
+                )
+            else:
+                st.session_state.eda_report_bytes = response.content
+                st.session_state.eda_generated = True
+                st.success("EDA report generated successfully.")
+
+        except requests.exceptions.ConnectionError:
+            st.error("Could not connect to the EDA API.")
+        except requests.exceptions.Timeout:
+            st.error(
+                "EDA report generation timed out. "
+                "The backend may still be working."
+            )
+        except Exception as e:
+            st.error(f"EDA report generation failed: {str(e)}")
+
+    if (
+        st.session_state.eda_generated
+        and st.session_state.eda_report_bytes is not None
+    ):
+        st.download_button(
+            "⬇️ Download EDA Report (HTML)",
+            data=st.session_state.eda_report_bytes,
+            file_name="EDA_report.html",
+            mime="text/html",
+            use_container_width=True,
+            key=f"download_{key}"
+        )
+
+
 # ==========================================================
 # HERO
 # ==========================================================
@@ -256,738 +311,17 @@ st.markdown(
 st.write(
     "Upload your dataset and automatically perform "
     "exploratory data analysis, preprocessing, "
-    "feature engineering, scaling and feature selection — "
+    "feature engineering and scaling. "
     "all in one workflow."
 )
 
 st.markdown(
     "**📁 Upload** → **📊 EDA** → **⚙️ Preprocess** → "
-    "**🎯 Feature Selection** → **📥 Download**"
+    "**🎯 Feature Processing** → **📥 Download**"
 )
 
 st.divider()
 
-
-
-# ==========================================================
-# NUMERICAL FEATURE ANALYSIS
-# ==========================================================
-
-def render_numerical_analysis(df, feature):
-
-    data = df[feature]
-
-    missing_count = int(
-        data.isnull().sum()
-    )
-
-    missing_percentage = (
-        data.isnull().mean() * 100
-    )
-
-    unique_count = int(
-        data.nunique()
-    )
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        st.metric(
-            "Type",
-            "Numerical"
-        )
-
-    with col2:
-
-        st.metric(
-            "Missing",
-            f"{missing_count} ({missing_percentage:.2f}%)"
-        )
-
-    with col3:
-
-        st.metric(
-            "Unique Values",
-            unique_count
-        )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        st.write("**Summary Statistics**")
-
-        stats = pd.DataFrame({
-
-            "Statistic": [
-                "Mean",
-                "Median",
-                "Std Dev",
-                "Minimum",
-                "Maximum",
-                "Skewness"
-            ],
-
-            "Value": [
-                data.mean(),
-                data.median(),
-                data.std(),
-                data.min(),
-                data.max(),
-                data.skew()
-            ]
-
-        })
-
-        st.dataframe(
-            stats,
-            hide_index=True,
-            use_container_width=True
-        )
-
-    with col2:
-
-        st.write("**Distribution**")
-
-        clean_data = data.dropna()
-
-        if not clean_data.empty:
-
-            distribution = (
-                clean_data
-                .value_counts()
-                .sort_index()
-            )
-
-            st.bar_chart(
-                distribution
-            )
-
-        else:
-
-            st.info(
-                "No values available."
-            )
-
-    st.write("**Box Plot**")
-
-    clean_data = data.dropna()
-
-    if not clean_data.empty:
-
-        fig = px.box(
-            clean_data,
-            y=feature,
-            points="outliers",
-            title=f"Box Plot - {feature}"
-        )
-
-        fig.update_layout(
-            height=400,
-            showlegend=False
-        )
-
-        st.plotly_chart(
-            fig,
-            use_container_width=True
-        )
-
-    else:
-
-        st.info(
-            "No values available for box plot."
-        )
-
-
-# ==========================================================
-# CATEGORICAL FEATURE ANALYSIS
-# ==========================================================
-
-def render_categorical_analysis(df, feature):
-
-    data = df[feature]
-
-    missing_count = int(
-        data.isnull().sum()
-    )
-
-    missing_percentage = (
-        data.isnull().mean() * 100
-    )
-
-    unique_count = int(
-        data.nunique()
-    )
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        st.metric(
-            "Type",
-            "Categorical"
-        )
-
-    with col2:
-
-        st.metric(
-            "Missing",
-            f"{missing_count} ({missing_percentage:.2f}%)"
-        )
-
-    with col3:
-
-        st.metric(
-            "Unique Values",
-            unique_count
-        )
-
-    st.write(
-        "**Category Distribution**"
-    )
-
-    value_counts = (
-        data
-        .fillna("Missing")
-        .astype(str)
-        .value_counts()
-        .head(15)
-    )
-
-    if not value_counts.empty:
-
-        st.bar_chart(
-            value_counts
-        )
-
-        category_table = pd.DataFrame({
-
-            "Category":
-                value_counts.index,
-
-            "Count":
-                value_counts.values,
-
-            "Percentage":
-                (
-                    value_counts.values
-                    / len(data)
-                    * 100
-                ).round(2)
-
-        })
-
-        st.dataframe(
-            category_table,
-            hide_index=True,
-            use_container_width=True
-        )
-
-    else:
-
-        st.info(
-            "No categorical values available."
-        )
-
-
-# ==========================================================
-# FEATURE ANALYSIS
-# ==========================================================
-
-def render_feature_analysis(df, feature):
-
-    if pd.api.types.is_numeric_dtype(
-        df[feature]
-    ):
-
-        render_numerical_analysis(
-            df,
-            feature
-        )
-
-    else:
-
-        render_categorical_analysis(
-            df,
-            feature
-        )
-
-
-# ==========================================================
-# TARGET ANALYSIS
-# ==========================================================
-
-def render_target_analysis(df, target):
-
-    st.subheader(
-        "🎯 Target Analysis"
-    )
-
-    target_data = df[target]
-
-    target_is_numeric = (
-        pd.api.types.is_numeric_dtype(
-            target_data
-        )
-    )
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-
-        st.metric(
-            "Target Type",
-            "Numerical"
-            if target_is_numeric
-            else "Categorical"
-        )
-
-    with col2:
-
-        st.metric(
-            "Missing",
-            int(
-                target_data.isnull().sum()
-            )
-        )
-
-    with col3:
-
-        st.metric(
-            "Unique Values",
-            int(
-                target_data.nunique()
-            )
-        )
-
-    with col4:
-
-        st.metric(
-            "Rows",
-            len(target_data)
-        )
-
-    if target_is_numeric:
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-
-            st.write(
-                "**Target Statistics**"
-            )
-
-            target_stats = pd.DataFrame({
-
-                "Statistic": [
-                    "Mean",
-                    "Median",
-                    "Std Dev",
-                    "Minimum",
-                    "Maximum",
-                    "Skewness"
-                ],
-
-                "Value": [
-                    target_data.mean(),
-                    target_data.median(),
-                    target_data.std(),
-                    target_data.min(),
-                    target_data.max(),
-                    target_data.skew()
-                ]
-
-            })
-
-            st.dataframe(
-                target_stats,
-                hide_index=True,
-                use_container_width=True
-            )
-
-        with col2:
-
-            clean_target = (
-                target_data.dropna()
-            )
-
-            if not clean_target.empty:
-
-                fig = px.histogram(
-                    clean_target,
-                    x=target,
-                    title=f"Target Distribution - {target}"
-                )
-
-                fig.update_layout(
-                    height=400
-                )
-
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True
-                )
-
-    else:
-
-        st.write(
-            "**Class Distribution**"
-        )
-
-        class_counts = (
-            target_data
-            .fillna("Missing")
-            .astype(str)
-            .value_counts()
-        )
-
-        class_table = pd.DataFrame({
-
-            "Class":
-                class_counts.index,
-
-            "Count":
-                class_counts.values,
-
-            "Percentage":
-                (
-                    class_counts.values
-                    / len(target_data)
-                    * 100
-                ).round(2)
-
-        })
-
-        st.dataframe(
-            class_table,
-            hide_index=True,
-            use_container_width=True
-        )
-
-        st.bar_chart(
-            class_counts
-        )
-
-
-# ==========================================================
-# FULL ON-SCREEN EDA
-# ==========================================================
-
-def render_full_eda(
-    df,
-    target_column=None,
-    unsupervised=False
-):
-
-    st.divider()
-
-    st.subheader(
-        "📊 Exploratory Data Analysis"
-    )
-
-    if unsupervised:
-
-        st.caption(
-            "The on-screen EDA analyzes every feature "
-            "without using a target variable."
-        )
-
-    else:
-
-        st.caption(
-            "The on-screen EDA analyzes every feature "
-            "and provides a separate analysis of the target."
-        )
-
-        render_target_analysis(
-            df,
-            target_column
-        )
-
-    numerical_features = [
-
-        column
-
-        for column in df.columns
-
-        if (
-            pd.api.types.is_numeric_dtype(
-                df[column]
-            )
-
-            and
-
-            (
-                unsupervised
-                or
-                column != target_column
-            )
-        )
-    ]
-
-    categorical_features = [
-
-        column
-
-        for column in df.columns
-
-        if (
-            not pd.api.types.is_numeric_dtype(
-                df[column]
-            )
-
-            and
-
-            (
-                unsupervised
-                or
-                column != target_column
-            )
-        )
-    ]
-
-    # ======================================================
-    # NUMERICAL FEATURES
-    # ======================================================
-
-    with st.expander(
-        f"➕ Numerical Features ({len(numerical_features)})",
-        expanded=False
-    ):
-
-        if numerical_features:
-
-            for feature in numerical_features:
-
-                with st.expander(
-                    f"🔎 {feature}",
-                    expanded=False
-                ):
-
-                    render_feature_analysis(
-                        df,
-                        feature
-                    )
-
-        else:
-
-            st.info(
-                "No numerical features available."
-            )
-
-    # ======================================================
-    # CATEGORICAL FEATURES
-    # ======================================================
-
-    with st.expander(
-        f"➕ Categorical Features ({len(categorical_features)})",
-        expanded=False
-    ):
-
-        if categorical_features:
-
-            for feature in categorical_features:
-
-                with st.expander(
-                    f"🔎 {feature}",
-                    expanded=False
-                ):
-
-                    render_feature_analysis(
-                        df,
-                        feature
-                    )
-
-        else:
-
-            st.info(
-                "No categorical features available."
-            )
-
-
-# ==========================================================
-# ==========================================================
-
-def generate_sweetviz_report(
-    df,
-    target=None
-):
-
-    temp_path = None
-
-    try:
-
-        MAX_EDA_ROWS = 5000
-
-        if len(df) > MAX_EDA_ROWS:
-
-            eda_df = df.sample(
-                n=MAX_EDA_ROWS,
-                random_state=42
-            )
-
-        else:
-
-            eda_df = df.copy()
-
-        temp_file = tempfile.NamedTemporaryFile(
-            suffix=".html",
-            delete=False
-        )
-
-        temp_path = temp_file.name
-
-        temp_file.close()
-
-        if target is not None:
-
-            report = sv.analyze(
-                eda_df,
-                target_feat=target,
-                pairwise_analysis="off"
-            )
-
-        else:
-
-            report = sv.analyze(
-                eda_df,
-                pairwise_analysis="off"
-            )
-
-        report.show_html(
-            filepath=temp_path,
-            open_browser=False,
-            layout="widescreen"
-        )
-
-        with open(
-            temp_path,
-            "rb"
-        ) as html_file:
-
-            report_bytes = html_file.read()
-
-        return report_bytes
-
-    finally:
-
-        if (
-            temp_path is not None
-            and
-            os.path.exists(temp_path)
-        ):
-
-            try:
-
-                os.remove(
-                    temp_path
-                )
-
-            except Exception:
-
-                pass
-
-
-# ==========================================================
-# ==========================================================
-
-def render_sweetviz_section(
-    df,
-    target_column=None,
-    key_suffix="default",
-    description=None
-):
-
-    st.divider()
-
-    st.subheader(
-        "📋 Full EDA Report"
-    )
-
-    if description:
-
-        st.write(
-            description
-        )
-
-    else:
-
-        st.write(
-            "The on-screen EDA above analyzes every feature. "
-            "You can optionally generate a comprehensive "
-            "interactive Sweetviz report."
-        )
-
-    st.warning(
-        "⚠️ Full report generation can take around "
-        "5 minutes depending on dataset size and complexity. "
-        "The preprocessing button will be disabled while "
-        "the report is being generated."
-    )
-
-    generate_disabled = (
-        st.session_state.eda_running
-        or
-        st.session_state.processing_running
-    )
-
-    if st.button(
-        "📊 Generate Full Sweetviz Report",
-        use_container_width=True,
-        key=f"generate_sweetviz_{key_suffix}",
-        disabled=generate_disabled
-    ):
-
-        st.session_state.eda_running = True
-
-        try:
-
-            with st.spinner(
-                "Generating full Sweetviz report..."
-            ):
-
-                report_bytes = (
-                    generate_sweetviz_report(
-                        df,
-                        target_column
-                    )
-                )
-
-            st.session_state.eda_report_bytes = (
-                report_bytes
-            )
-
-            st.session_state.eda_generated = True
-
-            st.success(
-                "✅ Full EDA report generated."
-            )
-
-        except Exception as e:
-
-            st.error(
-                f"Sweetviz report generation failed: {str(e)}"
-            )
-
-        finally:
-
-            st.session_state.eda_running = False
-
-    if (
-        st.session_state.eda_generated
-        and
-        st.session_state.eda_report_bytes is not None
-    ):
-
-        st.download_button(
-            label="📄 Download Full EDA Report (HTML)",
-            data=st.session_state.eda_report_bytes,
-            file_name="eda_report.html",
-            mime="text/html",
-            use_container_width=True,
-            key=f"download_sweetviz_{key_suffix}"
-        )
 
 
 # ==========================================================
@@ -1270,22 +604,38 @@ if ml_task == "Supervised Learning":
             key="single_dataset_target"
         )
 
+        st.caption(
+            "EDA is available as a downloadable HTML report. "
+            "It is generated from the supervised EDA notebook."
+        )
+
+        uploaded_file.seek(0)
+        generate_eda_report_download(
+            files={
+                "file": (
+                    uploaded_file.name,
+                    uploaded_file,
+                    "text/csv"
+                )
+            },
+            data={
+                "ml_task": "Supervised Learning",
+                "dataset_type": dataset_type,
+                "target": target_column
+            },
+            key="generate_eda_supervised_single"
+        )
+        uploaded_file.seek(0)
+
+
         # ==================================================
         # EDA
         # ==================================================
 
-        render_full_eda(
-            df,
-            target_column=target_column
-        )
 
         # ==================================================
+        # ==================================================
 
-        render_sweetviz_section(
-            df,
-            target_column,
-            "supervised_single"
-        )
 
         # ==================================================
         # PROCESSING
@@ -1302,11 +652,7 @@ if ml_task == "Supervised Learning":
             "engineer features."
         )
 
-        processing_disabled = (
-            st.session_state.eda_running
-            or
-            st.session_state.processing_running
-        )
+        processing_disabled = st.session_state.processing_running
 
         if st.button(
             "🚀 Process Dataset",
@@ -1573,29 +919,37 @@ if ml_task == "Supervised Learning":
             key="test_dataset_target"
         )
 
+        st.caption(
+            "EDA uses the training dataset only and is available "
+            "as a downloadable HTML report."
+        )
+
+        train_file.seek(0)
+        generate_eda_report_download(
+            files={
+                "train_file": (
+                    train_file.name,
+                    train_file,
+                    "text/csv"
+                )
+            },
+            data={
+                "ml_task": "Supervised Learning",
+                "dataset_type": "Test Dataset",
+                "target": target_column
+            },
+            key="generate_eda_supervised_test"
+        )
+        train_file.seek(0)
+
+
         st.info(
             "ℹ️ EDA is performed on the **training dataset only**. "
             "The test dataset is kept unseen because it should "
             "not influence preprocessing or feature-selection decisions."
         )
 
-        render_full_eda(
-            train_df,
-            target_column
-        )
 
-        render_sweetviz_section(
-            train_df,
-            target_column,
-            "test",
-            description=(
-                "The on-screen EDA and Sweetviz report are generated "
-                "using the **training dataset only**. The test dataset "
-                "is kept separate and is only transformed after the "
-                "preprocessing pipeline has been fitted on the "
-                "training data."
-            )
-        )
 
         st.divider()
 
@@ -1609,11 +963,7 @@ if ml_task == "Supervised Learning":
             "then be applied to the test dataset."
         )
 
-        process_disabled = (
-            st.session_state.eda_running
-            or
-            st.session_state.processing_running
-        )
+        process_disabled = st.session_state.processing_running
 
         if st.button(
             "🚀 Process Test Dataset",
@@ -2001,6 +1351,34 @@ else:
                 st.stop()
 
 
+        if (
+            unsupervised_dataset_type
+            == "Test Dataset"
+        ):
+
+            st.caption(
+                "EDA uses the training dataset only and is available "
+                "as a downloadable HTML report."
+            )
+
+            unsupervised_file.seek(0)
+            generate_eda_report_download(
+                files={
+                    "train_file": (
+                        unsupervised_train_file.name,
+                        unsupervised_train_file,
+                        "text/csv"
+                    )
+                },
+                data={
+                    "ml_task": "Unsupervised Learning",
+                    "dataset_type": "Test Dataset"
+                },
+                key="generate_eda_unsupervised_test"
+            )
+            unsupervised_file.seek(0)
+
+
         numerical_features = [
             column
             for column in unsupervised_df.columns
@@ -2067,30 +1445,30 @@ else:
             f"**{int(unsupervised_df.duplicated().sum()):,}**"
         )
 
-
-        # ==================================================
-        # EDA
-        # ==================================================
-
-        render_full_eda(
-            unsupervised_df,
-            unsupervised=True
+        st.caption(
+            "EDA is available as a downloadable HTML report "
+            "generated from the unsupervised EDA notebook."
         )
 
-        # ==================================================
-
-        render_sweetviz_section(
-            unsupervised_df,
-            target_column=None,
-            key_suffix="unsupervised",
-            description=(
-                "The on-screen EDA above analyzes every feature. "
-                "You can optionally generate a comprehensive "
-                "target-free Sweetviz report."
-            )
+        unsupervised_file.seek(0)
+        generate_eda_report_download(
+            files={
+                "file": (
+                    unsupervised_file.name,
+                    unsupervised_file,
+                    "text/csv"
+                )
+            },
+            data={
+                "ml_task": "Unsupervised Learning",
+                "dataset_type": unsupervised_dataset_type
+            },
+            key="generate_eda_unsupervised_single"
         )
+        unsupervised_file.seek(0)
 
-        # ==================================================
+
+
         # PROCESSING
         # ==================================================
 
@@ -2107,11 +1485,7 @@ else:
             "features and scale the resulting feature matrix."
         )
 
-        processing_disabled = (
-            st.session_state.eda_running
-            or
-            st.session_state.processing_running
-        )
+        processing_disabled = st.session_state.processing_running
 
         if st.button(
             "🚀 Process Unsupervised Dataset",
@@ -2896,5 +2270,5 @@ if st.session_state.processed:
 
 st.caption(
     "Auto ML Preprocessor · Automated EDA · "
-    "Feature Engineering · Feature Selection"
+    "Feature Engineering · Feature Processing"
 )

@@ -1,11 +1,11 @@
+streamlit
 pandas
 numpy
-scipy
-scikit-learn
+requests
 fastapi
 uvicorn
 python-multipart
-streamlit
-requests
-sweetviz
-plotly
+scikit-learn
+scipy
+matplotlib
+seaborn
