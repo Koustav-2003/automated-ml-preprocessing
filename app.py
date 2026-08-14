@@ -4,6 +4,14 @@ import requests
 import io
 import zipfile
 import textwrap
+import base64
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
 
 
 # ==========================================================
@@ -194,6 +202,16 @@ defaults = {
 
     # Locks
     "processing_running": False,
+    "eda_running": False,
+    "operation_process": None,
+    "operation_result_path": None,
+    "operation_request_path": None,
+    "operation_tmp_dir": None,
+    "operation_kind": None,
+    "operation_metadata": {},
+    "operation_message": None,
+    "operation_error": None,
+    "active_input_signature": None,
 
     # Metadata
     "processed_target": None,
@@ -227,6 +245,8 @@ def clear_results(clear_uploads=False):
     st.session_state.eda_generated = False
     st.session_state.processed_target = None
     st.session_state.processed_dataset_type = None
+    st.session_state.operation_error = None
+    st.session_state.operation_message = None
 
     if clear_uploads:
         for key in [
@@ -240,49 +260,267 @@ def clear_results(clear_uploads=False):
         ]:
             st.session_state.pop(key, None)
 
+        st.session_state.active_input_signature = None
+
+
+def operation_is_running():
+    return (
+        st.session_state.processing_running
+        or st.session_state.eda_running
+    )
+
+
+def file_payload(uploaded_file):
+    uploaded_file.seek(0)
+    content = uploaded_file.getvalue()
+    return {
+        "name": uploaded_file.name,
+        "content": base64.b64encode(content).decode("ascii"),
+        "mime": "text/csv",
+    }
+
+
+def input_signature(*parts):
+    digest = hashlib.sha256()
+    for part in parts:
+        if part is None:
+            digest.update(b"<NONE>")
+        elif isinstance(part, bytes):
+            digest.update(part)
+        else:
+            digest.update(str(part).encode("utf-8"))
+        digest.update(b"\x00")
+    return digest.hexdigest()
+
+
+def sync_input_signature(signature):
+    """Clear old outputs when the actual input/target changes."""
+    previous = st.session_state.active_input_signature
+    if previous is not None and previous != signature:
+        clear_results(clear_uploads=False)
+    st.session_state.active_input_signature = signature
+
+
+def launch_http_operation(kind, endpoint, files, data, metadata=None):
+    """Start API work in a separate process so the UI can be cancelled."""
+
+    tmp_dir = tempfile.mkdtemp(prefix="auto_ml_operation_")
+    request_path = os.path.join(tmp_dir, "request.json")
+    result_path = os.path.join(tmp_dir, "result.json")
+    worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "operation_worker.py")
+
+    payload = {
+        "endpoint": endpoint,
+        "files": files,
+        "data": data,
+        "timeout": 300,
+    }
+
+    with open(request_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+    process = subprocess.Popen([
+        sys.executable,
+        worker,
+        request_path,
+        result_path,
+    ])
+
+    st.session_state.operation_process = process
+    st.session_state.operation_result_path = result_path
+    st.session_state.operation_request_path = request_path
+    st.session_state.operation_tmp_dir = tmp_dir
+    st.session_state.operation_kind = kind
+    st.session_state.operation_metadata = metadata or {}
+    st.session_state.operation_error = None
+    st.session_state.operation_message = (
+        "Generating the EDA report..."
+        if kind == "eda"
+        else "Preprocessing the dataset..."
+    )
+    st.session_state.eda_running = kind == "eda"
+    st.session_state.processing_running = kind == "process"
+
+
+def cleanup_operation_files():
+    tmp_dir = st.session_state.get("operation_tmp_dir")
+    if tmp_dir and os.path.isdir(tmp_dir):
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    st.session_state.operation_process = None
+    st.session_state.operation_result_path = None
+    st.session_state.operation_request_path = None
+    st.session_state.operation_tmp_dir = None
+    st.session_state.operation_kind = None
+    st.session_state.operation_metadata = {}
+
+
+def cancel_current_operation():
+    process = st.session_state.get("operation_process")
+    if process is not None and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except Exception:
+            process.kill()
+
+    kind = st.session_state.get("operation_kind")
+    st.session_state.processing_running = False
+    st.session_state.eda_running = False
+    st.session_state.operation_error = None
+    st.session_state.operation_message = None
+    cleanup_operation_files()
+
+    st.session_state.operation_error = (
+        "EDA generation cancelled."
+        if kind == "eda"
+        else "Preprocessing cancelled."
+    )
+
+
+def finish_background_operation():
+    """Collect a finished child-process request and update the UI state."""
+
+    process = st.session_state.get("operation_process")
+    if process is None:
+        return False
+
+    if process.poll() is None:
+        return False
+
+    kind = st.session_state.operation_kind
+    result_path = st.session_state.operation_result_path
+
+    result = None
+    if result_path and os.path.exists(result_path):
+        try:
+            with open(result_path, "r", encoding="utf-8") as f:
+                result = json.load(f)
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc), "content": ""}
+
+    if not result:
+        result = {
+            "ok": False,
+            "error": "The operation ended without a response.",
+            "content": "",
+        }
+
+    st.session_state.processing_running = False
+    st.session_state.eda_running = False
+
+    if not result.get("ok"):
+        st.session_state.operation_error = result.get(
+            "error", "Unknown API error"
+        )
+        cleanup_operation_files()
+        return True
+
+    content = base64.b64decode(result.get("content", ""))
+
+    if kind == "eda":
+        st.session_state.eda_report_bytes = content
+        st.session_state.eda_generated = True
+        st.session_state.operation_message = (
+            "EDA report generated successfully."
+        )
+
+    else:
+        try:
+            with zipfile.ZipFile(io.BytesIO(content), "r") as zip_file:
+                names = zip_file.namelist()
+
+                st.session_state.zip_bytes = content
+                st.session_state.x_train_bytes = (
+                    zip_file.read("X_train.csv")
+                    if "X_train.csv" in names else None
+                )
+                st.session_state.x_test_bytes = (
+                    zip_file.read("X_test.csv")
+                    if "X_test.csv" in names else None
+                )
+                st.session_state.pipeline_info_bytes = (
+                    zip_file.read("pipeline_info.txt")
+                    if "pipeline_info.txt" in names else None
+                )
+
+            st.session_state.processed = True
+            st.session_state.processed_target = st.session_state.operation_metadata.get(
+                "target"
+            )
+            st.session_state.processed_dataset_type = st.session_state.operation_metadata.get(
+                "dataset_type"
+            )
+            st.session_state.operation_message = (
+                "Dataset processed successfully."
+            )
+
+        except zipfile.BadZipFile:
+            st.session_state.operation_error = (
+                "The API returned an invalid ZIP file."
+            )
+
+    cleanup_operation_files()
+    return True
+
+
+def render_operation_lock():
+    """Show status/cancel while the background operation is running."""
+    if not operation_is_running():
+        return
+
+    kind = st.session_state.operation_kind
+    label = (
+        "EDA report generation is in progress..."
+        if kind == "eda"
+        else "Dataset preprocessing is in progress..."
+    )
+
+    st.warning(label)
+    st.caption(
+        "All other controls are temporarily disabled. "
+        "You can cancel the current operation below."
+    )
+
+    if st.button(
+        "✖ Cancel Operation",
+        use_container_width=True,
+        key="cancel_current_operation"
+    ):
+        cancel_current_operation()
+        st.rerun()
+
+    if finish_background_operation():
+        st.rerun()
+
+    time.sleep(0.7)
+    st.rerun()
 
 
 def generate_eda_report_download(files, data, key):
-    """Request the notebook-based EDA report from the FastAPI backend."""
+    """Start the notebook-based EDA report as a cancellable operation."""
+
+    disabled = (
+        operation_is_running()
+        or st.session_state.eda_generated
+        or st.session_state.processed
+    )
 
     if st.button(
         "📊 Generate EDA Report",
         use_container_width=True,
-        key=key
+        key=key,
+        disabled=disabled
     ):
-        try:
-            response = requests.post(
-                EDA_API_URL,
-                files=files,
-                data=data,
-                timeout=300
-            )
-
-            if response.status_code != 200:
-                try:
-                    detail = response.json().get(
-                        "detail", "Unknown EDA API error"
-                    )
-                except Exception:
-                    detail = response.text
-
-                st.error(
-                    f"EDA report generation failed: {detail}"
-                )
-            else:
-                st.session_state.eda_report_bytes = response.content
-                st.session_state.eda_generated = True
-                st.success("EDA report generated successfully.")
-
-        except requests.exceptions.ConnectionError:
-            st.error("Could not connect to the EDA API.")
-        except requests.exceptions.Timeout:
-            st.error(
-                "EDA report generation timed out. "
-                "The backend may still be working."
-            )
-        except Exception as e:
-            st.error(f"EDA report generation failed: {str(e)}")
+        launch_http_operation(
+            "eda",
+            EDA_API_URL,
+            files,
+            data,
+            metadata={"eda_key": key}
+        )
+        st.rerun()
 
     if (
         st.session_state.eda_generated
@@ -296,6 +534,17 @@ def generate_eda_report_download(files, data, key):
             use_container_width=True,
             key=f"download_{key}"
         )
+
+
+render_operation_lock()
+
+if st.session_state.operation_error:
+    st.error(st.session_state.operation_error)
+    st.session_state.operation_error = None
+
+if st.session_state.operation_message:
+    st.success(st.session_state.operation_message)
+    st.session_state.operation_message = None
 
 
 # ==========================================================
@@ -607,9 +856,23 @@ if ml_task == "Supervised Learning":
             key="single_dataset_target"
         )
 
+        sync_input_signature(
+            input_signature(
+                "supervised-single",
+                dataset_type,
+                target_column,
+                uploaded_file.getvalue()
+            )
+        )
+
+        st.warning(
+            "EDA is optional and may take some time to generate. "
+            "It does not affect the preprocessing process or its results."
+        )
+
         st.caption(
-            "EDA is available as a downloadable HTML report. "
-            "It is generated from the supervised EDA notebook."
+            "EDA is available only as a downloadable HTML report generated "
+            "from the supervised EDA notebook."
         )
 
         uploaded_file.seek(0)
@@ -655,7 +918,11 @@ if ml_task == "Supervised Learning":
             "engineer features."
         )
 
-        processing_disabled = st.session_state.processing_running
+        processing_disabled = (
+            operation_is_running()
+            or st.session_state.eda_generated
+            or st.session_state.processed
+        )
 
         if st.button(
             "🚀 Process Dataset",
@@ -663,160 +930,25 @@ if ml_task == "Supervised Learning":
             key="process_single_dataset",
             disabled=processing_disabled
         ):
-
-            st.session_state.processing_running = True
-
-            try:
-
-                with st.spinner(
-                    "Running preprocessing..."
-                ):
-
-                    uploaded_file.seek(0)
-
-                    response = requests.post(
-                        API_URL,
-
-                        files={
-                            "file": (
-                                uploaded_file.name,
-                                uploaded_file,
-                                "text/csv"
-                            )
-                        },
-
-                        data={
-                            "ml_task":
-                                "Supervised Learning",
-
-                            "dataset_type":
-                                dataset_type,
-
-                            "target":
-                                target_column,
-
-                            "test_size":
-                                supervised_test_size_percent / 100
-                        },
-
-                        timeout=300
-                    )
-
-                    if response.status_code != 200:
-
-                        try:
-
-                            error_detail = (
-                                response.json()
-                                .get(
-                                    "detail",
-                                    "Unknown API error"
-                                )
-                            )
-
-                        except Exception:
-
-                            error_detail = response.text
-
-                        st.error(
-                            f"Processing failed: {error_detail}"
-                        )
-
-                    else:
-
-                        st.session_state.zip_bytes = (
-                            response.content
-                        )
-
-                        with zipfile.ZipFile(
-                            io.BytesIO(
-                                response.content
-                            ),
-                            "r"
-                        ) as zip_file:
-
-                            files_in_zip = (
-                                zip_file.namelist()
-                            )
-
-                            if "X_train.csv" in files_in_zip:
-
-                                st.session_state.x_train_bytes = (
-                                    zip_file.read(
-                                        "X_train.csv"
-                                    )
-                                )
-
-                            else:
-
-                                st.session_state.x_train_bytes = None
-
-                            if "X_test.csv" in files_in_zip:
-
-                                st.session_state.x_test_bytes = (
-                                    zip_file.read(
-                                        "X_test.csv"
-                                    )
-                                )
-
-                            else:
-
-                                st.session_state.x_test_bytes = None
-
-                            if "pipeline_info.txt" in files_in_zip:
-
-                                st.session_state.pipeline_info_bytes = (
-                                    zip_file.read(
-                                        "pipeline_info.txt"
-                                    )
-                                )
-
-                            else:
-
-                                st.session_state.pipeline_info_bytes = None
-
-                        st.session_state.processed = True
-
-                        st.session_state.processed_target = (
-                            target_column
-                        )
-
-                        st.session_state.processed_dataset_type = (
-                            dataset_type
-                        )
-
-                        st.success(
-                            "✅ Dataset processed successfully!"
-                        )
-
-            except requests.exceptions.ConnectionError:
-
-                st.error(
-                    "Could not connect to the preprocessing API."
-                )
-
-            except requests.exceptions.Timeout:
-
-                st.error(
-                    "The request timed out. The backend may "
-                    "be waking up or the dataset may be too large."
-                )
-
-            except zipfile.BadZipFile:
-
-                st.error(
-                    "The API returned an invalid ZIP file."
-                )
-
-            except Exception as e:
-
-                st.error(
-                    f"An unexpected error occurred: {str(e)}"
-                )
-
-            finally:
-
-                st.session_state.processing_running = False
+            uploaded_file.seek(0)
+            launch_http_operation(
+                "process",
+                API_URL,
+                {
+                    "file": file_payload(uploaded_file)
+                },
+                {
+                    "ml_task": "Supervised Learning",
+                    "dataset_type": dataset_type,
+                    "target": target_column,
+                    "test_size": supervised_test_size_percent / 100
+                },
+                metadata={
+                    "target": target_column,
+                    "dataset_type": dataset_type
+                }
+            )
+            st.rerun()
 
     # ======================================================
     # TEST DATASET WORKFLOW
@@ -922,9 +1054,20 @@ if ml_task == "Supervised Learning":
             key="test_dataset_target"
         )
 
-        st.caption(
-            "EDA uses the training dataset only and is available "
-            "as a downloadable HTML report."
+        sync_input_signature(
+            input_signature(
+                "supervised-test",
+                dataset_type,
+                target_column,
+                train_file.getvalue(),
+                test_file.getvalue()
+            )
+        )
+
+        st.warning(
+            "EDA is optional and may take some time to generate. "
+            "It does not affect preprocessing. For this workflow, "
+            "EDA uses the training dataset only."
         )
 
         train_file.seek(0)
@@ -966,7 +1109,11 @@ if ml_task == "Supervised Learning":
             "then be applied to the test dataset."
         )
 
-        process_disabled = st.session_state.processing_running
+        process_disabled = (
+            operation_is_running()
+            or st.session_state.eda_generated
+            or st.session_state.processed
+        )
 
         if st.button(
             "🚀 Process Test Dataset",
@@ -974,164 +1121,26 @@ if ml_task == "Supervised Learning":
             key="process_test_dataset",
             disabled=process_disabled
         ):
-
-            st.session_state.processing_running = True
-
-            try:
-
-                with st.spinner(
-                    "Fitting preprocessing on training data "
-                    "and transforming test data..."
-                ):
-
-                    train_file.seek(0)
-                    test_file.seek(0)
-
-                    response = requests.post(
-                        API_URL,
-
-                        files={
-                            "train_file": (
-                                train_file.name,
-                                train_file,
-                                "text/csv"
-                            ),
-
-                            "test_file": (
-                                test_file.name,
-                                test_file,
-                                "text/csv"
-                            )
-                        },
-
-                        data={
-                            "ml_task":
-                                "Supervised Learning",
-
-                            "dataset_type":
-                                "Test Dataset",
-
-                            "target":
-                                target_column
-                        },
-
-                        timeout=300
-                    )
-
-                    if response.status_code != 200:
-
-                        try:
-
-                            error_detail = (
-                                response.json()
-                                .get(
-                                    "detail",
-                                    "Unknown API error"
-                                )
-                            )
-
-                        except Exception:
-
-                            error_detail = response.text
-
-                        st.error(
-                            f"Processing failed: {error_detail}"
-                        )
-
-                    else:
-
-                        st.session_state.zip_bytes = (
-                            response.content
-                        )
-
-                        with zipfile.ZipFile(
-                            io.BytesIO(
-                                response.content
-                            ),
-                            "r"
-                        ) as zip_file:
-
-                            files_in_zip = (
-                                zip_file.namelist()
-                            )
-
-                            if "X_train.csv" in files_in_zip:
-
-                                st.session_state.x_train_bytes = (
-                                    zip_file.read(
-                                        "X_train.csv"
-                                    )
-                                )
-
-                            else:
-
-                                st.session_state.x_train_bytes = None
-
-                            if "X_test.csv" in files_in_zip:
-
-                                st.session_state.x_test_bytes = (
-                                    zip_file.read(
-                                        "X_test.csv"
-                                    )
-                                )
-
-                            else:
-
-                                st.session_state.x_test_bytes = None
-
-                            if "pipeline_info.txt" in files_in_zip:
-
-                                st.session_state.pipeline_info_bytes = (
-                                    zip_file.read(
-                                        "pipeline_info.txt"
-                                    )
-                                )
-
-                            else:
-
-                                st.session_state.pipeline_info_bytes = None
-
-                        st.session_state.processed = True
-
-                        st.session_state.processed_target = (
-                            target_column
-                        )
-
-                        st.session_state.processed_dataset_type = (
-                            "Test Dataset"
-                        )
-
-                        st.success(
-                            "✅ Test dataset processed successfully!"
-                        )
-
-            except requests.exceptions.ConnectionError:
-
-                st.error(
-                    "Could not connect to the preprocessing API."
-                )
-
-            except requests.exceptions.Timeout:
-
-                st.error(
-                    "The request timed out."
-                )
-
-            except zipfile.BadZipFile:
-
-                st.error(
-                    "The API returned an invalid ZIP file."
-                )
-
-            except Exception as e:
-
-                st.error(
-                    f"An unexpected error occurred: {str(e)}"
-                )
-
-            finally:
-
-                st.session_state.processing_running = False
+            train_file.seek(0)
+            test_file.seek(0)
+            launch_http_operation(
+                "process",
+                API_URL,
+                {
+                    "train_file": file_payload(train_file),
+                    "test_file": file_payload(test_file)
+                },
+                {
+                    "ml_task": "Supervised Learning",
+                    "dataset_type": "Test Dataset",
+                    "target": target_column
+                },
+                metadata={
+                    "target": target_column,
+                    "dataset_type": "Test Dataset"
+                }
+            )
+            st.rerun()
 
 
 # ==========================================================
@@ -1178,7 +1187,11 @@ else:
         != unsupervised_dataset_type
     ):
 
-        clear_results()
+        clear_results(clear_uploads=True)
+        st.session_state.previous_unsupervised_dataset_type = (
+            unsupervised_dataset_type
+        )
+        st.rerun()
 
 
     st.session_state.previous_unsupervised_dataset_type = (
@@ -1314,6 +1327,20 @@ else:
             f"{unsupervised_df.shape[1]:,} columns"
         )
 
+        sync_input_signature(
+            input_signature(
+                "unsupervised",
+                unsupervised_dataset_type,
+                unsupervised_file.getvalue(),
+                (
+                    unsupervised_test_file.getvalue()
+                    if unsupervised_dataset_type == "Test Dataset"
+                    and unsupervised_test_file is not None
+                    else b""
+                )
+            )
+        )
+
 
         st.subheader(
             "👀 Dataset Preview"
@@ -1356,33 +1383,6 @@ else:
 
                 st.stop()
 
-
-        if (
-            unsupervised_dataset_type
-            == "Test Dataset"
-        ):
-
-            st.caption(
-                "EDA uses the training dataset only and is available "
-                "as a downloadable HTML report."
-            )
-
-            unsupervised_train_file.seek(0)
-            generate_eda_report_download(
-                files={
-                    "train_file": (
-                        unsupervised_train_file.name,
-                        unsupervised_train_file,
-                        "text/csv"
-                    )
-                },
-                data={
-                    "ml_task": "Unsupervised Learning",
-                    "dataset_type": "Test Dataset"
-                },
-                key="generate_eda_unsupervised_test"
-            )
-            unsupervised_train_file.seek(0)
 
 
         numerical_features = [
@@ -1451,27 +1451,50 @@ else:
             f"**{int(unsupervised_df.duplicated().sum()):,}**"
         )
 
-        st.caption(
-            "EDA is available as a downloadable HTML report "
-            "generated from the unsupervised EDA notebook."
+        st.warning(
+            "EDA is optional and may take some time to generate. "
+            "It does not affect the preprocessing process or its results."
         )
 
-        unsupervised_file.seek(0)
-        generate_eda_report_download(
-            files={
-                "file": (
-                    unsupervised_file.name,
-                    unsupervised_file,
+        st.caption(
+            "EDA is available only as a downloadable HTML report generated "
+            "from the unsupervised EDA notebook."
+        )
+
+        eda_file = (
+            unsupervised_train_file
+            if unsupervised_dataset_type == "Test Dataset"
+            else unsupervised_file
+        )
+
+        eda_file.seek(0)
+        eda_files = (
+            {
+                "train_file": (
+                    eda_file.name,
+                    eda_file,
                     "text/csv"
                 )
-            },
+            }
+            if unsupervised_dataset_type == "Test Dataset"
+            else {
+                "file": (
+                    eda_file.name,
+                    eda_file,
+                    "text/csv"
+                )
+            }
+        )
+
+        generate_eda_report_download(
+            files=eda_files,
             data={
                 "ml_task": "Unsupervised Learning",
                 "dataset_type": unsupervised_dataset_type
             },
             key="generate_eda_unsupervised_single"
         )
-        unsupervised_file.seek(0)
+        eda_file.seek(0)
 
 
 
@@ -1491,7 +1514,11 @@ else:
             "features and scale the resulting feature matrix."
         )
 
-        processing_disabled = st.session_state.processing_running
+        processing_disabled = (
+            operation_is_running()
+            or st.session_state.eda_generated
+            or st.session_state.processed
+        )
 
         if st.button(
             "🚀 Process Unsupervised Dataset",
@@ -1499,221 +1526,38 @@ else:
             key="process_unsupervised_dataset",
             disabled=processing_disabled
         ):
+            if unsupervised_dataset_type == "Test Dataset":
+                unsupervised_train_file.seek(0)
+                unsupervised_test_file.seek(0)
+                request_files = {
+                    "train_file": file_payload(unsupervised_train_file),
+                    "test_file": file_payload(unsupervised_test_file)
+                }
+            else:
+                unsupervised_file.seek(0)
+                request_files = {
+                    "file": file_payload(unsupervised_file)
+                }
 
-            st.session_state.processing_running = True
-
-            try:
-
-                with st.spinner(
-                    "Running unsupervised preprocessing..."
-                ):
-
-                    # Build the multipart request according to the
-                    # selected unsupervised workflow.
-                    if (
-                        unsupervised_dataset_type
-                        == "Test Dataset"
-                    ):
-
-                        if (
-                            unsupervised_train_file is None
-                            or
-                            unsupervised_test_file is None
-                        ):
-
-                            st.error(
-                                "Please upload both the training "
-                                "and test datasets."
-                            )
-
-                            st.stop()
-
-                        unsupervised_train_file.seek(0)
-                        unsupervised_test_file.seek(0)
-
-                        request_files = {
-                            "train_file": (
-                                unsupervised_train_file.name,
-                                unsupervised_train_file,
-                                "text/csv"
-                            ),
-
-                            "test_file": (
-                                unsupervised_test_file.name,
-                                unsupervised_test_file,
-                                "text/csv"
-                            )
-                        }
-
-                    else:
-
-                        if unsupervised_file is None:
-
-                            st.error(
-                                "Please upload a dataset first."
-                            )
-
-                            st.stop()
-
-                        unsupervised_file.seek(0)
-
-                        request_files = {
-                            "file": (
-                                unsupervised_file.name,
-                                unsupervised_file,
-                                "text/csv"
-                            )
-                        }
-
-                    response = requests.post(
-                        API_URL,
-
-                        files=request_files,
-
-                        data={
-                            "ml_task":
-                                "Unsupervised Learning",
-
-                            "dataset_type":
-                                unsupervised_dataset_type,
-
-                            "test_size":
-                                (
-                                    unsupervised_test_size_percent / 100
-                                    if unsupervised_dataset_type
-                                    == "Entire Dataset"
-                                    else 0.20
-                                )
-                        },
-
-                        timeout=300
+            launch_http_operation(
+                "process",
+                API_URL,
+                request_files,
+                {
+                    "ml_task": "Unsupervised Learning",
+                    "dataset_type": unsupervised_dataset_type,
+                    "test_size": (
+                        unsupervised_test_size_percent / 100
+                        if unsupervised_dataset_type == "Entire Dataset"
+                        else 0.20
                     )
-
-                    if response.status_code != 200:
-
-                        try:
-
-                            error_detail = (
-                                response.json()
-                                .get(
-                                    "detail",
-                                    "Unknown API error"
-                                )
-                            )
-
-                        except Exception:
-
-                            error_detail = response.text
-
-                        st.error(
-                            f"Processing failed: {error_detail}"
-                        )
-
-                    else:
-
-                        st.session_state.zip_bytes = (
-                            response.content
-                        )
-
-                        with zipfile.ZipFile(
-                            io.BytesIO(
-                                response.content
-                            ),
-                            "r"
-                        ) as zip_file:
-
-                            files_in_zip = (
-                                zip_file.namelist()
-                            )
-
-                            # The unsupervised pipeline now returns
-                            # X_train.csv and X_test.csv, just like the
-                            # supervised pipeline. Keep the same output
-                            # handling for both learning types.
-
-                            if "X_train.csv" in files_in_zip:
-
-                                st.session_state.x_train_bytes = (
-                                    zip_file.read(
-                                        "X_train.csv"
-                                    )
-                                )
-
-                            else:
-
-                                st.session_state.x_train_bytes = None
-
-                            if "X_test.csv" in files_in_zip:
-
-                                st.session_state.x_test_bytes = (
-                                    zip_file.read(
-                                        "X_test.csv"
-                                    )
-                                )
-
-                            else:
-
-                                st.session_state.x_test_bytes = None
-
-                            # Keep processed_bytes for backward compatibility
-                            # with any existing session state, but the actual
-                            # unsupervised outputs are X_train/X_test.
-                            st.session_state.processed_bytes = None
-
-                            if (
-                                "pipeline_info.txt"
-                                in files_in_zip
-                            ):
-
-                                st.session_state.pipeline_info_bytes = (
-                                    zip_file.read(
-                                        "pipeline_info.txt"
-                                    )
-                                )
-
-                            else:
-
-                                st.session_state.pipeline_info_bytes = None
-
-                        st.session_state.processed = True
-
-                        st.session_state.processed_target = None
-
-                        st.session_state.processed_dataset_type = (
-                            "Unsupervised Dataset"
-                        )
-
-                        st.success(
-                            "✅ Unsupervised dataset processed successfully!"
-                        )
-
-            except requests.exceptions.ConnectionError:
-
-                st.error(
-                    "Could not connect to the preprocessing API."
-                )
-
-            except requests.exceptions.Timeout:
-
-                st.error(
-                    "The request timed out."
-                )
-
-            except zipfile.BadZipFile:
-
-                st.error(
-                    "The API returned an invalid ZIP file."
-                )
-
-            except Exception as e:
-
-                st.error(
-                    f"An unexpected error occurred: {str(e)}"
-                )
-
-            finally:
-
-                st.session_state.processing_running = False
+                },
+                metadata={
+                    "target": None,
+                    "dataset_type": "Unsupervised Dataset"
+                }
+            )
+            st.rerun()
 
 
 # ==========================================================
