@@ -6,7 +6,12 @@ from scipy import stats
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import Lasso, LogisticRegression
 from sklearn.feature_selection import SelectFromModel
+from sklearn.model_selection import train_test_split
 
+
+# ==========================================================
+# CORE DATA PREPROCESSOR
+# ==========================================================
 
 class DataPreprocessor:
 
@@ -33,7 +38,7 @@ class DataPreprocessor:
         self.scale_features = scale_features
 
         # ==================================================
-        # GENERAL
+        # GENERAL STATE
         # ==================================================
 
         self.id_cols = []
@@ -45,7 +50,6 @@ class DataPreprocessor:
         self.train_medians = {}
 
         self.frequent_labels = {}
-
         self.categorical_features = []
 
         self.skewed_features = []
@@ -59,7 +63,7 @@ class DataPreprocessor:
         self.fitted = False
 
         # ==================================================
-        # SUPERVISED
+        # SUPERVISED STATE
         # ==================================================
 
         self.label_mappings = {}
@@ -69,11 +73,19 @@ class DataPreprocessor:
         self.selected_features = []
 
         # ==================================================
-        # UNSUPERVISED
+        # UNSUPERVISED STATE
         # ==================================================
 
         self.one_hot_categories = {}
         self.unsupervised_feature_columns = []
+
+        # ==================================================
+        # FEATURE COUNTS
+        # ==================================================
+
+        self.feature_count_before_processing = 0
+        self.feature_count_after_encoding = 0
+        self.feature_count_after_selection = 0
 
     # ======================================================
     # CATEGORICAL FEATURES
@@ -87,7 +99,10 @@ class DataPreprocessor:
             if (
                 pd.api.types.is_object_dtype(X[col])
                 or pd.api.types.is_string_dtype(X[col])
-                or pd.api.types.is_categorical_dtype(X[col])
+                or isinstance(
+                    X[col].dtype,
+                    pd.CategoricalDtype
+                )
             )
         ]
 
@@ -95,7 +110,7 @@ class DataPreprocessor:
     # TASK DETECTION
     # ======================================================
 
-    def _detect_task(self, y):
+    def detect_task(self, y):
 
         if (
             pd.api.types.is_object_dtype(y)
@@ -106,12 +121,16 @@ class DataPreprocessor:
 
         if pd.api.types.is_numeric_dtype(y):
 
-            if y.nunique() <= 20:
+            if y.nunique(dropna=True) <= 20:
                 return "classification"
 
             return "regression"
 
         return "classification"
+
+    # Backward-compatible internal name.
+    def _detect_task(self, y):
+        return self.detect_task(y)
 
     # ======================================================
     # ID DETECTION
@@ -124,7 +143,6 @@ class DataPreprocessor:
         for col in X.columns:
 
             if X[col].nunique(dropna=False) == len(X):
-
                 self.id_cols.append(col)
 
         return self.id_cols
@@ -154,7 +172,7 @@ class DataPreprocessor:
         ]
 
     # ======================================================
-    # MISSING INDICATORS
+    # MISSING VALUE INDICATORS
     # ======================================================
 
     def _add_missing_indicators(self, X):
@@ -222,7 +240,7 @@ class DataPreprocessor:
         return X
 
     # ======================================================
-    # RARE CATEGORIES
+    # RARE CATEGORY HANDLING
     # ======================================================
 
     def _fit_rare_labels(self, X):
@@ -250,7 +268,9 @@ class DataPreprocessor:
 
         X = X.copy()
 
-        for feature, frequent in self.frequent_labels.items():
+        for feature, frequent in (
+            self.frequent_labels.items()
+        ):
 
             if feature not in X.columns:
                 continue
@@ -338,6 +358,10 @@ class DataPreprocessor:
             self._get_categorical_features(X)
         )
 
+        self.categorical_features = (
+            categorical_features
+        )
+
         self.global_target_mean = y.mean()
 
         self.label_mappings = {}
@@ -346,7 +370,7 @@ class DataPreprocessor:
 
             temp = pd.DataFrame({
                 "category": X[feature].values,
-                "target": y.values
+                "target": np.asarray(y)
             })
 
             grouped = (
@@ -384,14 +408,16 @@ class DataPreprocessor:
 
                 if category in mapping:
 
-                    category_sum = mapping[
-                        category
-                    ]["sum"]
+                    category_sum = (
+                        mapping[category]["sum"]
+                    )
 
-                    category_count = mapping[
-                        category
-                    ]["count"]
+                    category_count = (
+                        mapping[category]["count"]
+                    )
 
+                    # Leave-one-out target encoding:
+                    # the current row's target is excluded.
                     other_sum = (
                         category_sum - y_array[i]
                     )
@@ -408,11 +434,15 @@ class DataPreprocessor:
 
                     else:
 
-                        value = self.global_target_mean
+                        value = (
+                            self.global_target_mean
+                        )
 
                 else:
 
-                    value = self.global_target_mean
+                    value = (
+                        self.global_target_mean
+                    )
 
                 encoded_values.append(value)
 
@@ -436,15 +466,17 @@ class DataPreprocessor:
                 if category not in mapping:
                     return self.global_target_mean
 
-                category_sum = mapping[
-                    category
-                ]["sum"]
+                category_sum = (
+                    mapping[category]["sum"]
+                )
 
-                category_count = mapping[
-                    category
-                ]["count"]
+                category_count = (
+                    mapping[category]["count"]
+                )
 
-                return category_sum / category_count
+                return (
+                    category_sum / category_count
+                )
 
             X[feature] = (
                 X[feature]
@@ -475,7 +507,9 @@ class DataPreprocessor:
                 .tolist()
             )
 
-            self.one_hot_categories[feature] = categories
+            self.one_hot_categories[feature] = (
+                categories
+            )
 
     def _apply_one_hot_encoding(self, X):
 
@@ -538,7 +572,6 @@ class DataPreprocessor:
         ]
 
         for feature in boolean_features:
-
             X[feature] = X[feature].astype(int)
 
         non_numeric_features = [
@@ -696,11 +729,7 @@ class DataPreprocessor:
     # SUPERVISED FIT
     # ======================================================
 
-    def fit(
-        self,
-        X_train,
-        y_train
-    ):
+    def fit(self, X_train, y_train):
 
         if y_train is None:
 
@@ -710,6 +739,16 @@ class DataPreprocessor:
             )
 
         X_train = X_train.copy()
+
+        self.feature_count_before_processing = (
+            X_train.shape[1]
+        )
+
+        self.task = (
+            self.task
+            if self.task is not None
+            else self.detect_task(y_train)
+        )
 
         self._detect_ids(X_train)
 
@@ -756,6 +795,10 @@ class DataPreprocessor:
             X_temp.columns.tolist()
         )
 
+        self.feature_count_after_encoding = (
+            len(self.feature_columns)
+        )
+
         self._fit_scaler(X_temp)
 
         X_temp = self._apply_scaling(
@@ -765,6 +808,10 @@ class DataPreprocessor:
         self._fit_feature_selector(
             X_temp,
             y_train
+        )
+
+        self.feature_count_after_selection = (
+            len(self.selected_features)
         )
 
         self.fitted = True
@@ -823,11 +870,7 @@ class DataPreprocessor:
     # SUPERVISED FIT TRANSFORM
     # ======================================================
 
-    def fit_transform(
-        self,
-        X_train,
-        y_train
-    ):
+    def fit_transform(self, X_train, y_train):
 
         self.fit(
             X_train,
@@ -872,9 +915,9 @@ class DataPreprocessor:
 
         X = X.copy()
 
-        # ----------------------------------------------
-        # ID detection
-        # ----------------------------------------------
+        self.feature_count_before_processing = (
+            X.shape[1]
+        )
 
         self._detect_ids(X)
 
@@ -883,49 +926,25 @@ class DataPreprocessor:
             errors="ignore"
         )
 
-        # ----------------------------------------------
-        # Missing values
-        # ----------------------------------------------
-
         self._detect_missing_features(X)
 
         self._fit_imputation(X)
 
         X = self._apply_imputation(X)
 
-        # ----------------------------------------------
-        # Rare categories
-        # ----------------------------------------------
-
         self._fit_rare_labels(X)
 
         X = self._apply_rare_labels(X)
-
-        # ----------------------------------------------
-        # Skewness
-        # ----------------------------------------------
 
         self._fit_skewness(X)
 
         X = self._apply_skewness(X)
 
-        # ----------------------------------------------
-        # One-hot encoding
-        # ----------------------------------------------
-
         self._fit_one_hot_encoding(X)
 
         X = self._apply_one_hot_encoding(X)
 
-        # ----------------------------------------------
-        # Numeric validation
-        # ----------------------------------------------
-
         X = self._ensure_numeric(X)
-
-        # ----------------------------------------------
-        # Save feature structure
-        # ----------------------------------------------
 
         self.feature_columns = (
             X.columns.tolist()
@@ -935,17 +954,20 @@ class DataPreprocessor:
             X.columns.tolist()
         )
 
-        # ----------------------------------------------
-        # Scaling
-        # ----------------------------------------------
+        self.feature_count_after_encoding = (
+            len(self.feature_columns)
+        )
 
         self._fit_scaler(X)
 
         self.task = "unsupervised"
 
-        # No target-based feature selection.
         self.selected_features = (
             self.feature_columns.copy()
+        )
+
+        self.feature_count_after_selection = (
+            len(self.selected_features)
         )
 
         self.fitted = True
@@ -971,69 +993,29 @@ class DataPreprocessor:
             index=X.index
         )
 
-        # ----------------------------------------------
-        # Preserve IDs
-        # ----------------------------------------------
-
         for col in self.id_cols:
 
             if col in X.columns:
                 ids[col] = X[col]
-
-        # ----------------------------------------------
-        # Remove IDs
-        # ----------------------------------------------
 
         X = X.drop(
             columns=self.id_cols,
             errors="ignore"
         )
 
-        # ----------------------------------------------
-        # Missing indicators
-        # ----------------------------------------------
-
         X = self._add_missing_indicators(X)
-
-        # ----------------------------------------------
-        # Imputation
-        # ----------------------------------------------
 
         X = self._apply_imputation(X)
 
-        # ----------------------------------------------
-        # Rare categories
-        # ----------------------------------------------
-
         X = self._apply_rare_labels(X)
-
-        # ----------------------------------------------
-        # Skewness
-        # ----------------------------------------------
 
         X = self._apply_skewness(X)
 
-        # ----------------------------------------------
-        # One-hot encoding
-        # ----------------------------------------------
-
         X = self._apply_one_hot_encoding(X)
-
-        # ----------------------------------------------
-        # Align columns
-        # ----------------------------------------------
 
         X = self._align_features(X)
 
-        # ----------------------------------------------
-        # Numeric validation
-        # ----------------------------------------------
-
         X = self._ensure_numeric(X)
-
-        # ----------------------------------------------
-        # Scaling
-        # ----------------------------------------------
 
         X = self._apply_scaling(X)
 
@@ -1095,11 +1077,20 @@ class DataPreprocessor:
             "scaled_features":
                 self.scalable_features,
 
+            "feature_count_before_processing":
+                self.feature_count_before_processing,
+
+            "feature_count_after_encoding":
+                self.feature_count_after_encoding,
+
             "original_feature_count":
-                len(self.feature_columns),
+                self.feature_count_before_processing,
 
             "selected_feature_count":
-                len(self.selected_features),
+                self.feature_count_after_selection,
+
+            "final_feature_count":
+                self.feature_count_after_selection,
 
             "selected_features":
                 self.selected_features,
@@ -1114,3 +1105,277 @@ class DataPreprocessor:
                     else "Not applicable"
                 )
         }
+
+
+# ==========================================================
+# COMPATIBILITY CLASSES
+# ==========================================================
+
+class SupervisedPreprocessor(DataPreprocessor):
+
+    def __init__(
+        self,
+        target_col=None,
+        **kwargs
+    ):
+
+        super().__init__(
+            target_col=target_col,
+            **kwargs
+        )
+
+
+class UnsupervisedPreprocessor(DataPreprocessor):
+
+    def __init__(
+        self,
+        test_size=0.20,
+        random_state=42,
+        **kwargs
+    ):
+
+        super().__init__(
+            target_col=None,
+            task="unsupervised",
+            **kwargs
+        )
+
+        self.test_size = test_size
+        self.random_state = random_state
+
+    def fit(self, X, y=None):
+
+        return self.fit_unsupervised(X)
+
+    def transform(self, X):
+
+        return self.transform_unsupervised(X)
+
+    def fit_transform(self, X, y=None):
+
+        self.fit_unsupervised(X)
+
+        return self.transform_unsupervised(X)
+
+
+# ==========================================================
+# SUPERVISED DATASET PROCESSOR
+# ==========================================================
+
+def process_supervised_dataset(
+    df,
+    target_col,
+    test_size=0.20,
+    random_state=42
+):
+
+    if target_col not in df.columns:
+
+        raise ValueError(
+            f"Target column '{target_col}' "
+            "not found in dataset."
+        )
+
+    if not 0 < test_size < 1:
+
+        raise ValueError(
+            "test_size must be between 0 and 1."
+        )
+
+    X = df.drop(
+        columns=[target_col]
+    )
+
+    y = df[target_col]
+
+    X_train, X_test, y_train, y_test = (
+        train_test_split(
+            X,
+            y,
+            test_size=test_size,
+            random_state=random_state
+        )
+    )
+
+    processor = SupervisedPreprocessor(
+        target_col=target_col
+    )
+
+    X_train_processed = (
+        processor.fit_transform(
+            X_train,
+            y_train
+        )
+    )
+
+    X_test_processed, test_ids = (
+        processor.transform(
+            X_test
+        )
+    )
+
+    train_ids = pd.DataFrame(
+        index=X_train.index
+    )
+
+    for col in processor.id_cols:
+
+        if col in X_train.columns:
+            train_ids[col] = X_train[col]
+
+    train_output = (
+        X_train_processed.reset_index(
+            drop=True
+        )
+    )
+
+    if not train_ids.empty:
+
+        train_output = pd.concat(
+            [
+                train_ids.reset_index(
+                    drop=True
+                ),
+                train_output
+            ],
+            axis=1
+        )
+
+    train_output[target_col] = (
+        y_train.reset_index(
+            drop=True
+        )
+    )
+
+    test_output = (
+        X_test_processed.reset_index(
+            drop=True
+        )
+    )
+
+    if not test_ids.empty:
+
+        test_output = pd.concat(
+            [
+                test_ids.reset_index(
+                    drop=True
+                ),
+                test_output
+            ],
+            axis=1
+        )
+
+    return {
+
+        "X_train":
+            train_output,
+
+        "X_test":
+            test_output,
+
+        "y_train":
+            y_train,
+
+        "y_test":
+            y_test,
+
+        "processor":
+            processor,
+
+        "info":
+            processor.get_info(),
+
+        "task":
+            processor.task
+    }
+
+
+# ==========================================================
+# UNSUPERVISED DATASET PROCESSOR
+# ==========================================================
+
+def process_unsupervised_dataset(
+    df,
+    test_size=0.20,
+    random_state=42
+):
+
+    if not 0 < test_size < 1:
+
+        raise ValueError(
+            "test_size must be between 0 and 1."
+        )
+
+    X_train, X_test = train_test_split(
+        df.copy(),
+        test_size=test_size,
+        random_state=random_state
+    )
+
+    processor = UnsupervisedPreprocessor(
+        test_size=test_size,
+        random_state=random_state
+    )
+
+    X_train_processed, train_ids = (
+        processor.fit_transform(
+            X_train
+        )
+    )
+
+    X_test_processed, test_ids = (
+        processor.transform(
+            X_test
+        )
+    )
+
+    train_output = (
+        X_train_processed.reset_index(
+            drop=True
+        )
+    )
+
+    if not train_ids.empty:
+
+        train_output = pd.concat(
+            [
+                train_ids.reset_index(
+                    drop=True
+                ),
+                train_output
+            ],
+            axis=1
+        )
+
+    test_output = (
+        X_test_processed.reset_index(
+            drop=True
+        )
+    )
+
+    if not test_ids.empty:
+
+        test_output = pd.concat(
+            [
+                test_ids.reset_index(
+                    drop=True
+                ),
+                test_output
+            ],
+            axis=1
+        )
+
+    return {
+
+        "X_train":
+            train_output,
+
+        "X_test":
+            test_output,
+
+        "processor":
+            processor,
+
+        "info":
+            processor.get_info()
+    }
