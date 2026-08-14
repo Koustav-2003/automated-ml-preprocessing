@@ -1,355 +1,470 @@
-# ⚙️ Auto ML Preprocessor
+⚙️ Auto ML Preprocessor
 
-An automated machine learning preprocessing tool designed to reduce the repetitive work involved in **EDA, data preprocessing, feature engineering, scaling, and feature selection**.
+Automated data preprocessing and feature engineering for supervised and unsupervised machine learning.
 
-The project supports both **supervised** and **unsupervised** learning workflows and provides a Streamlit interface for uploading datasets, analyzing them, processing them, previewing the results, and downloading the generated outputs.
+Upload → Optional EDA → Preprocess → Feature Processing → Download
 
-> **No more manual EDA. No more repetitive preprocessing.**
+🚀 Live Application
 
----
+Streamlit App: https://automated-ml-preprocessing.streamlit.app/
 
-## 🚀 Live Demo
+FastAPI Backend: https://automated-ml-preprocessing-api.onrender.com/
 
-Try the deployed application:
+The Streamlit frontend communicates with the FastAPI backend to perform EDA generation and dataset preprocessing.
 
-**[👉 Click here to try the deployed app](https://automated-ml-preprocessing.streamlit.app/)**
+✨ Features
 
----
+Learning modes
 
-## 📓 Jupyter / Colab Notebooks
+Supervised Learning
 
-### Supervised Learning
+Classification
 
-The supervised preprocessing workflow handles datasets containing a target variable and prepares the data for downstream machine learning models.
+Regression
 
-**[👉 Click here to open the Supervised Learning notebook](https://drive.google.com/file/d/1U4UVvxlxXWTV5SKuxUw5U2xMEEPFOaUj/view?usp=sharing)**
+Target selection
 
-### Unsupervised Learning
+Supervised target encoding
 
-The unsupervised workflow is designed for datasets without a target variable and follows a separate preprocessing path.
+Unsupervised Learning
 
-**[👉 Click here to open the Unsupervised Learning notebook](https://drive.google.com/file/d/1PrboXqurh9mhsEFj40RUuVoMEUKp9hTx/view?usp=sharing)**
+No target variable required
 
----
+One-hot encoding for categorical variables
 
-## ✨ Features
+Unsupervised preprocessing workflow
 
-### 🧠 Learning Type Selection
+Dataset workflows
 
-The application supports two processing modes:
+The application supports three input workflows for both supervised and unsupervised processing:
 
-- **Supervised Learning**
-  - Works with a target variable.
-  - Automatically detects the type of supervised task.
-  - Keeps the target separate from feature preprocessing.
+1. Entire Dataset
 
-- **Unsupervised Learning**
-  - Does not require a target variable.
-  - Processes the feature matrix directly.
-  - Uses a separate target-free preprocessing pipeline.
+Upload one complete CSV.
 
----
+Complete Dataset
+      ↓
+Train/Test Split
+      ↓
+Fit preprocessing on training data
+      ↓
+Transform test data
+      ↓
+X_train + X_test
 
-### 📂 Dataset Workflows
+2. Training Dataset
 
-For both supervised and unsupervised processing, the application supports:
+Upload only the training dataset.
 
-#### Entire Dataset
-
-Upload a complete dataset and automatically split it into training and testing data.
-
-The test size can be selected by the user.
-
-**Default: 20% test / 80% training**
-
-#### Training Dataset
-
-Upload an already-prepared training dataset.
+Training Dataset
+      ↓
+Fit preprocessing
+      ↓
+Processed Training Dataset
 
 No additional train/test split is performed.
 
-#### Test Dataset
+3. Training + Test Dataset
 
 Upload separate training and test datasets.
 
-The preprocessing pipeline is:
+Training Dataset
+      ↓
+Fit preprocessing
+      ↓
+Learned preprocessing parameters
+      ↓
+Apply to training + test
 
-1. Fitted using the training dataset.
-2. Learned preprocessing parameters are retained.
-3. The same transformations are applied to the test dataset.
+The test dataset is kept unseen while preprocessing parameters are learned.
 
-This prevents information from the test dataset from leaking into the training preprocessing stage.
+📊 EDA
 
----
+EDA is optional and is completely separate from preprocessing.
 
-## 📊 Automated EDA
+The application generates a downloadable HTML EDA report based on the project's EDA notebooks.
 
-The application performs automated exploratory data analysis before preprocessing.
+EDA does not affect preprocessing.
 
-The analysis includes information such as:
+EDA does not change the processed dataset.
 
-- Dataset dimensions
-- Feature types
-- Missing-value information
-- Unique-value counts
-- Numerical feature statistics
-- Distributions
-- Skewness
-- Outlier visualization
-- Categorical feature information
-- Numerical feature visualizations
-- Box plots
+For train/test workflows, EDA is generated from the training dataset only.
 
-The project also uses **Sweetviz** for automated exploratory analysis.
+EDA is delivered as a downloadable HTML report rather than being displayed as a large visualization dashboard inside the application.
 
----
+Sweetviz is not required.
 
-## 🧹 Automated Preprocessing
+Supervised EDA
 
-Depending on the dataset, the preprocessing pipeline can handle common preprocessing tasks such as:
+📊 View Supervised EDA Notebook
 
-- Missing-value handling
-- Numerical feature processing
-- Categorical feature processing
-- Encoding categorical variables
-- Skewed numerical features
-- Feature scaling
-- Feature selection
-- ID-like column handling
+Unsupervised EDA
 
-The exact preprocessing path depends on the structure of the uploaded dataset.
+📊 View Unsupervised EDA Notebook
 
----
+🧠 Preprocessing Pipeline
 
-## 🔬 Supervised Processing Pipeline
+Supervised Pipeline
 
-The supervised workflow follows a target-aware preprocessing path.
-
-A typical workflow is:
-
-```text
-Dataset
+Raw Data
    ↓
-Target Identification
-   ↓
-EDA
-   ↓
-Train / Test Split
+ID Detection
    ↓
 Missing Value Handling
    ↓
-Categorical Feature Processing
+Missing Indicators
    ↓
-Numerical Feature Processing
+Rare Category Handling
    ↓
-Feature Engineering
+Skewness Transformation
    ↓
-Scaling
+Target Encoding
    ↓
-Feature Selection
+Feature Scaling
    ↓
-Processed X_train / X_test
-```
+Processed Data
 
-When separate training and test datasets are provided, the pipeline is fitted only on the training data before being applied to the test data.
+Unsupervised Pipeline
 
----
-
-## 🔬 Unsupervised Processing Pipeline
-
-The unsupervised workflow does not use a target variable.
-
-Its general flow is:
-
-```text
-Dataset
+Raw Data
    ↓
-EDA
-   ↓
-Train / Test Split (if required)
-   ↓
-ID-like Column Detection
+ID Detection
    ↓
 Missing Value Handling
    ↓
-Categorical Feature Processing
+Missing Indicators
    ↓
-Skewed Feature Transformation
+Rare Category Handling
    ↓
-Scaling
+Skewness Transformation
    ↓
-Processed Feature Matrix
-```
-
-The unsupervised pipeline is intentionally separate from the supervised pipeline because the absence of a target changes several preprocessing decisions.
-
----
-
-## 📦 Output
-
-Processed datasets are generated as downloadable files.
-
-Depending on the selected workflow, the output can contain:
-
-- `X_train.csv`
-- `X_test.csv`
-- Pipeline information
-- Complete downloadable package
-
-The generated outputs are timestamped so that different preprocessing runs can be distinguished.
-
----
-
-## 🖥️ Application Workflow
-
-The overall application workflow is:
-
-```text
-📁 Upload
+One-Hot Encoding
    ↓
-🧠 Choose Learning Type
+Feature Scaling
    ↓
-📊 Automated EDA
-   ↓
-⚙️ Automated Preprocessing
-   ↓
-🎯 Feature Selection
-   ↓
-🔍 Processed Dataset Preview
-   ↓
-📥 Download
-```
+Processed Data
 
----
+🛡️ Data Leakage Prevention
 
-## 🛠️ Tech Stack
+For separate train/test workflows, preprocessing parameters are learned from the training data and then applied to the test data.
 
-- Python
-- Pandas
-- NumPy
-- SciPy
-- Scikit-learn
-- Sweetviz
-- Plotly
-- FastAPI
-- Uvicorn
-- Streamlit
-- Requests
+Training Data
+      ↓
+Fit preprocessing
+      ↓
+Learn:
+  • imputation values
+  • category mappings
+  • scaling parameters
+  • other learned transformations
+      ↓
+Apply learned preprocessing
+      ↓
+Training Data + Test Data
 
----
+The test dataset is not used to learn preprocessing parameters.
 
-## 📁 Project Structure
+🎯 Feature Engineering
 
-A simplified structure of the project is:
+Feature engineering is intentionally kept separate from automatic model-based feature selection.
 
-```text
-Data_Preprocessing/
-│
+The project does not perform automatic Lasso/L1 feature elimination. The preprocessing system focuses on transforming the data while retaining the resulting feature space.
+
+Supervised Feature Engineering
+
+🧠 View Supervised Feature Engineering Notebook
+
+Unsupervised Feature Engineering
+
+🧠 View Unsupervised Feature Engineering Notebook
+
+🔧 Processing Components
+
+CSV input and dataset validation
+
+ID-like column detection
+
+Missing-value detection
+
+Missing-value indicators
+
+Numerical imputation
+
+Categorical imputation
+
+Rare-category handling
+
+Supervised target encoding
+
+Unsupervised one-hot encoding
+
+Skewness transformation
+
+Feature scaling
+
+Leakage-safe train/test processing
+
+Processed-data preview
+
+Pipeline information report
+
+CSV and ZIP downloads
+
+Downloadable EDA HTML report
+
+🏗️ Architecture
+
+                         ┌──────────────────────────┐
+                         │      Streamlit App       │
+                         │         app.py           │
+                         └────────────┬─────────────┘
+                                      │
+                                  HTTP API
+                                      │
+                                      ▼
+                         ┌──────────────────────────┐
+                         │       FastAPI API        │
+                         │         main.py          │
+                         └────────────┬─────────────┘
+                                      │
+                                      ▼
+                         ┌──────────────────────────┐
+                         │      Processing          │
+                         │       pipeline.py        │
+                         └──────────────────────────┘
+
+EDA:
+EDA notebooks → FastAPI /eda → Downloadable HTML report
+
+📂 Project Structure
+
+.
 ├── app.py
 ├── main.py
-│
-├── supervised_pipeline.py
-├── unsupervised_pipeline.py
-│
-├── Data_Preprocessing.ipynb
-│
-├── outputs/
-│
+├── pipeline.py
+├── operation_worker.py
 ├── requirements.txt
-└── README.md
-```
+├── README.md
+│
+├── EDA_supervised.ipynb
+├── EDA_unsupervised.ipynb
+├── Feature_Engineering_supervised.ipynb
+└── Feature_Engineering_unsupervised.ipynb
 
-The project uses separate preprocessing pipelines for supervised and unsupervised learning to keep the two workflows independent and easier to maintain.
+File
 
----
+Purpose
 
-## ⚙️ Running Locally
+app.py
 
-### 1. Clone the repository
+Streamlit frontend and workflow controls
 
-```bash
-git clone https://github.com/Koustav-2003/automated-ml-preprocessing.git
-cd automated-ml-preprocessing
-```
+main.py
 
-### 2. Install dependencies
+FastAPI backend and API endpoints
 
-```bash
+pipeline.py
+
+Core preprocessing and feature-engineering logic
+
+operation_worker.py
+
+Background worker for long-running/cancelable operations
+
+requirements.txt
+
+Python dependencies
+
+⚙️ Installation
+
+git clone https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
+cd YOUR_REPOSITORY
+python -m venv venv
+
+Windows
+
+venv\Scripts\activate
+
+Linux / macOS
+
+source venv/bin/activate
+
+Install dependencies:
+
 pip install -r requirements.txt
-```
 
-### 3. Start the FastAPI backend
+▶️ Run Locally
 
-```bash
+Start FastAPI
+
+python main.py
+
+or:
+
 uvicorn main:app --reload
-```
 
-### 4. Start the Streamlit application
+The API should be available at:
 
-```bash
+http://localhost:8000
+
+Start Streamlit
+
+Open another terminal:
+
 streamlit run app.py
-```
 
-The Streamlit frontend communicates with the FastAPI backend to perform the preprocessing operations.
+🌐 Deployment
 
----
+Frontend
 
-## 📌 Important Notes
+Streamlit Community Cloud:
 
-- The **Entire Dataset** workflow uses a configurable test split with **20% as the default**.
-- The **Training Dataset** workflow does not perform another train/test split.
-- The **Test Dataset** workflow expects separate training and test datasets.
-- For supervised learning, the target variable is not treated as a normal input feature during feature preprocessing.
-- For unsupervised learning, no target variable is required.
-- When separate train/test datasets are supplied, preprocessing is fitted on the training data and then applied to the test data.
+https://automated-ml-preprocessing.streamlit.app/
 
----
+Backend
 
-## 🎯 Purpose of the Project
+Render:
 
-This project was built primarily as a practical **machine learning automation tool** to reduce repetitive preprocessing work.
+https://automated-ml-preprocessing-api.onrender.com/
 
-It is not intended to replace understanding of EDA or preprocessing. Instead, the goal is to automate the repetitive implementation so that more time can be spent on:
+The frontend sends API requests to the deployed backend for EDA generation and preprocessing.
 
-- Understanding the dataset
-- Selecting appropriate models
-- Feature engineering decisions
-- Model evaluation
-- Experimentation
+📥 Outputs
 
-It also serves as a practical implementation of common preprocessing techniques learned throughout the machine learning workflow.
+Depending on the workflow, the application can provide:
 
----
+X_train.csv
+X_test.csv
+pipeline_info.txt
+processed_dataset.zip
+EDA_report.html
 
-## 🔮 Future Improvements
+Pipeline report
 
-Possible future versions could extend the tool with:
+The pipeline report summarizes processing decisions such as:
 
-- Automated model recommendation
-- Automated supervised model training
-- Hyperparameter tuning
-- Clustering model selection
-- Dimensionality reduction
-- Automated anomaly detection
-- More feature-engineering strategies
-- Model comparison
-- Explainable AI
-- Exportable preprocessing pipelines
-- MLOps integration
+detected ID columns
 
----
+missing-value handling
 
-## 👨‍💻 Project
+transformed/skewed features
 
-**Auto ML Preprocessor**
+scaling
 
-Built as a practical machine learning automation project to streamline the repetitive parts of the ML workflow.
+final feature counts
 
-**Live application:**  
-[👉 Click here to try the deployed app](https://automated-ml-preprocessing.streamlit.app/)
+feature-selection status
 
-**Supervised notebook:**  
-[👉 Click here to open](https://drive.google.com/file/d/1U4UVvxlxXWTV5SKuxUw5U2xMEEPFOaUj/view?usp=sharing)
+Feature selection is intentionally disabled.
 
-**Unsupervised notebook:**  
-[👉 Click here to open](https://drive.google.com/file/d/1PrboXqurh9mhsEFj40RUuVoMEUKp9hTx/view?usp=sharing)
+🔄 Example Workflow
+
+Supervised Learning
+
+Upload Dataset
+      ↓
+Select Supervised Learning
+      ↓
+Select Dataset Workflow
+      ↓
+Select Target
+      ↓
+(Optional) Generate EDA Report
+      ↓
+Process Dataset
+      ↓
+Download Processed Data
+
+Unsupervised Learning
+
+Upload Dataset
+      ↓
+Select Unsupervised Learning
+      ↓
+Select Dataset Workflow
+      ↓
+(Optional) Generate EDA Report
+      ↓
+Process Dataset
+      ↓
+Download Processed Data
+
+⏳ Operation Controls
+
+While EDA or preprocessing is running:
+
+other operations are locked
+
+learning-type controls are locked
+
+dataset-workflow controls are locked
+
+upload controls are locked
+
+only the Cancel button remains available
+
+EDA and preprocessing are independent operations.
+
+The EDA report may take longer than preprocessing because it runs multiple analyses and generates embedded visualizations.
+
+⚠️ Limitations
+
+CSV input is currently supported.
+
+Large datasets may require additional CPU and memory.
+
+EDA report generation can take time because it performs multiple analyses and generates visualizations.
+
+Cancellation stops the frontend worker waiting for an API request; if the backend has already received the request, server-side computation may continue.
+
+Automatic model-based feature selection is intentionally not performed.
+
+The project currently focuses on preprocessing and feature engineering rather than automated model training.
+
+🔮 Future Improvements
+
+Automated supervised model selection
+
+Cross-validation
+
+Hyperparameter tuning
+
+Model evaluation and comparison
+
+Automated model export
+
+Model deployment
+
+Server-side job IDs and true backend cancellation
+
+Support for additional file formats
+
+Authentication and API access control
+
+Automated ML experiment tracking
+
+📚 Project Notebooks
+
+Exploratory Data Analysis
+
+Supervised EDA
+
+Unsupervised EDA
+
+Feature Engineering
+
+Supervised Feature Engineering
+
+Unsupervised Feature Engineering
+
+👨‍💻 Author
+
+Koustav Pattanayak
+
+GitHub: YOUR_GITHUB_PROFILE
+
+LinkedIn: YOUR_LINKEDIN_PROFILE
+
+📄 License
+
+MIT License
