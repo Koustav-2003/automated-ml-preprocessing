@@ -11,7 +11,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 
 
 # ==========================================================
@@ -530,10 +529,60 @@ def finish_background_operation():
 
 
 def render_operation_lock():
-    """Persistent operation banner with a real, visible cancel control."""
+    """Render a persistent operation controller without blocking the main page."""
     if not operation_is_running():
         return
 
+    # Streamlit fragments are important here.  The old implementation used
+    # st.rerun() + time.sleep() in the main script, which could prevent the
+    # browser from ever receiving a stable rendered Cancel button.  A
+    # fragment lets the main page render normally with every control disabled,
+    # while this small area polls the background worker.
+    try:
+        fragment = st.fragment
+    except AttributeError:
+        # Older Streamlit fallback: render the controls.  The main page still
+        # uses the global disabled lock, but automatic polling is unavailable.
+        _render_operation_controller()
+        return
+
+    @fragment(run_every="0.5s")
+    def _operation_controller_fragment():
+        if not operation_is_running():
+            return
+
+        kind = st.session_state.get("operation_kind")
+        label = (
+            "📊 EDA report generation is in progress..."
+            if kind == "eda"
+            else "⚙️ Dataset preprocessing is in progress..."
+        )
+
+        with st.container(border=True):
+            st.warning(label)
+            st.caption(
+                "All controls are locked while this operation is running. "
+                "Only Cancel Operation is available."
+            )
+
+            if st.button(
+                "✖ Cancel Operation",
+                type="primary",
+                use_container_width=True,
+                key="cancel_current_operation",
+            ):
+                cancel_current_operation()
+                st.rerun(scope="app")
+
+        # Check the worker without blocking the page.
+        if finish_background_operation():
+            st.rerun(scope="app")
+
+    _operation_controller_fragment()
+
+
+def _render_operation_controller():
+    """Fallback controller for Streamlit versions without fragments."""
     kind = st.session_state.get("operation_kind")
     label = (
         "📊 EDA report generation is in progress..."
@@ -545,24 +594,16 @@ def render_operation_lock():
         st.warning(label)
         st.caption(
             "All controls are locked while this operation is running. "
-            "You cannot change learning type, dataset workflow, files, "
-            "targets, EDA, or preprocessing until it finishes or is cancelled."
+            "Only Cancel Operation is available."
         )
         if st.button(
             "✖ Cancel Operation",
             type="primary",
             use_container_width=True,
-            key="cancel_current_operation"
+            key="cancel_current_operation",
         ):
             cancel_current_operation()
             st.rerun()
-
-    if finish_background_operation():
-        st.rerun()
-
-    time.sleep(0.5)
-    st.rerun()
-
 
 def generate_eda_report_download(files, data, key):
     """Render exactly one persistent EDA control for the current workflow."""
