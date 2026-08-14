@@ -5,7 +5,7 @@ import io
 import zipfile
 from pathlib import Path
 
-from pipeline_updated import (
+from pipeline import (
     SupervisedPreprocessor,
     UnsupervisedPreprocessor,
     process_supervised_dataset,
