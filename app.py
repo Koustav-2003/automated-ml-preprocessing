@@ -413,11 +413,7 @@ def launch_http_operation(kind, endpoint, files, data, metadata=None, timeout=30
     st.session_state.operation_kind = kind
     st.session_state.operation_metadata = metadata or {}
     st.session_state.operation_error = None
-    st.session_state.operation_message = (
-        "Generating the EDA report..."
-        if kind == "eda"
-        else "Preprocessing the dataset..."
-    )
+    st.session_state.operation_message = None
     st.session_state.eda_running = kind == "eda"
     st.session_state.processing_running = kind == "process"
 
