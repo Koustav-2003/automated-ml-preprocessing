@@ -585,9 +585,12 @@ def create_eda_report(
         raise ValueError("A valid target column is required for supervised EDA.")
 
     # These definitions mirror the notebooks.
+    # Match the notebook's intent (numerical vs categorical), but use
+    # pandas' dtype API so pandas StringDtype/category columns cannot be
+    # accidentally sent through numpy.log().
     numerical_values = [
         feature for feature in df.columns
-        if df[feature].dtype != "O"
+        if pd.api.types.is_numeric_dtype(df[feature])
     ]
 
     year_feature = [
@@ -608,7 +611,7 @@ def create_eda_report(
 
     categorical_features = [
         feature for feature in df.columns
-        if df[feature].dtype == "O"
+        if not pd.api.types.is_numeric_dtype(df[feature])
     ]
 
     features_with_nan = [
@@ -895,8 +898,12 @@ def create_eda_report(
             + _image_html(_fig_to_base64(fig), f"Distribution of {feature}")
         )
 
-        if 0 not in data.unique():
-            log_data = np.log(data)
+        # Notebook logic inspects log-transformed continuous features.
+        # Only apply log when all observed values are strictly positive;
+        # this preserves the notebook's intent while preventing invalid
+        # log operations on zero/negative/string-like data.
+        if (not data.empty) and np.isfinite(data).all() and (data > 0).all():
+            log_data = np.log(data.to_numpy(dtype=float))
             fig, ax = plt.subplots(figsize=(8, 3.5))
             ax.boxplot(log_data, vert=False)
             ax.set_xlabel(f"log({feature})")
@@ -1357,10 +1364,7 @@ async def process_dataset(
             # already supplied the training portion.
             # --------------------------------------------------
 
-            processor = UnsupervisedPreprocessor(
-                test_size=0.20,
-                random_state=42
-            )
+            processor = UnsupervisedPreprocessor()
 
             try:
 
@@ -1529,10 +1533,7 @@ async def process_dataset(
             # training pipeline.
             # --------------------------------------------------
 
-            processor = UnsupervisedPreprocessor(
-                test_size=0.20,
-                random_state=42
-            )
+            processor = UnsupervisedPreprocessor()
 
             try:
 

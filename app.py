@@ -405,6 +405,9 @@ if ml_task == "Supervised Learning":
 
     st.session_state.previous_dataset_type = dataset_type
 
+    # Safe default used by Training/Test workflows too.
+    supervised_test_size_percent = 20
+
     # ======================================================
     # ENTIRE DATASET
     # ======================================================
@@ -946,7 +949,7 @@ if ml_task == "Supervised Learning":
         st.info(
             "ℹ️ EDA is performed on the **training dataset only**. "
             "The test dataset is kept unseen because it should "
-            "not influence preprocessing or feature-selection decisions."
+            "not influence preprocessing or preprocessing decisions."
         )
 
 
@@ -1183,6 +1186,9 @@ else:
     )
 
 
+    # Safe default used by Training/Test workflows too.
+    unsupervised_test_size_percent = 20
+
     # ======================================================
     # ENTIRE DATASET
     # ======================================================
@@ -1361,7 +1367,7 @@ else:
                 "as a downloadable HTML report."
             )
 
-            unsupervised_file.seek(0)
+            unsupervised_train_file.seek(0)
             generate_eda_report_download(
                 files={
                     "train_file": (
@@ -1376,7 +1382,7 @@ else:
                 },
                 key="generate_eda_unsupervised_test"
             )
-            unsupervised_file.seek(0)
+            unsupervised_train_file.seek(0)
 
 
         numerical_features = [
@@ -2269,6 +2275,6 @@ if st.session_state.processed:
 # ==========================================================
 
 st.caption(
-    "Auto ML Preprocessor · Automated EDA · "
+    "Auto ML Preprocessor · Downloadable EDA · "
     "Feature Engineering · Feature Processing"
 )
