@@ -661,7 +661,20 @@ def generate_eda_report_download(files, data, key):
     processed = bool(st.session_state.get("processed", False))
 
     if completed and st.session_state.get("eda_report_bytes") is not None:
-        st.success("EDA report generated successfully. The report is ready to download.")
+        st.success(
+            "EDA report generated successfully. The report is ready to download."
+        )
+        st.download_button(
+            "⬇️ Download EDA Report (HTML)",
+            data=st.session_state.eda_report_bytes,
+            file_name=st.session_state.get(
+                "eda_report_filename",
+                "EDA_report.html"
+            ),
+            mime="text/html",
+            use_container_width=True,
+            key=f"download_eda_{key}"
+        )
         st.button(
             "📊 EDA Report Generated",
             use_container_width=True,
@@ -1082,7 +1095,6 @@ if ml_task == "Supervised Learning":
 
         processing_disabled = (
             ui_is_locked()
-            or st.session_state.eda_generated
             or st.session_state.processed
         )
 
@@ -1693,7 +1705,6 @@ else:
 
         processing_disabled = (
             ui_is_locked()
-            or st.session_state.eda_generated
             or st.session_state.processed
         )
 
@@ -2304,33 +2315,6 @@ if st.session_state.processed:
 
 
 
-
-# ==========================================================
-# PERSISTENT EDA DOWNLOAD
-# ==========================================================
-# Keep the report visible even if Streamlit reruns into a different
-# conditional workflow block after the background operation finishes.
-if (
-    st.session_state.get("eda_generated", False)
-    and st.session_state.get("eda_report_bytes") is not None
-):
-    st.divider()
-    with st.container(border=True):
-        st.subheader("📊 EDA Report")
-        st.caption(
-            "EDA is optional and does not affect preprocessing. "
-            "The generated HTML report remains available until you upload "
-            "a new input or choose a different workflow."
-        )
-        st.download_button(
-            "⬇️ Download EDA Report (HTML)",
-            data=st.session_state.eda_report_bytes,
-            file_name=st.session_state.get("eda_report_filename", "EDA_report.html"),
-            mime="text/html",
-            use_container_width=True,
-            disabled=ui_is_locked(),
-            key="persistent_eda_download"
-        )
 
 # ==========================================================
 # FOOTER
