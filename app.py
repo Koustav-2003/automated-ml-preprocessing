@@ -309,10 +309,52 @@ def launch_http_operation(kind, endpoint, files, data, metadata=None):
     result_path = os.path.join(tmp_dir, "result.json")
     worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "operation_worker.py")
 
+    # Convert Streamlit UploadedFile / requests-style file tuples into
+    # JSON-safe payloads before handing the request to the worker process.
+    # The previous version passed UploadedFile objects directly for EDA,
+    # which caused: Object of type UploadedFile is not JSON serializable.
+    serialized_files = {}
+    for field, value in (files or {}).items():
+        if isinstance(value, dict) and "content" in value:
+            serialized_files[field] = value
+            continue
+
+        if isinstance(value, tuple) and len(value) >= 2:
+            name = value[0]
+            file_obj = value[1]
+            mime = value[2] if len(value) >= 3 else "text/csv"
+
+            if hasattr(file_obj, "getvalue"):
+                content = file_obj.getvalue()
+            elif isinstance(file_obj, (bytes, bytearray)):
+                content = bytes(file_obj)
+            elif hasattr(file_obj, "read"):
+                current_pos = file_obj.tell() if hasattr(file_obj, "tell") else None
+                content = file_obj.read()
+                if current_pos is not None and hasattr(file_obj, "seek"):
+                    file_obj.seek(current_pos)
+            else:
+                raise TypeError(
+                    f"Unsupported file object for '{field}': "
+                    f"{type(file_obj).__name__}"
+                )
+
+            serialized_files[field] = {
+                "name": str(name),
+                "content": base64.b64encode(content).decode("ascii"),
+                "mime": str(mime),
+            }
+            continue
+
+        raise TypeError(
+            f"Unsupported file payload for '{field}': "
+            f"{type(value).__name__}"
+        )
+
     payload = {
         "endpoint": endpoint,
-        "files": files,
-        "data": data,
+        "files": serialized_files,
+        "data": data or {},
         "timeout": 300,
     }
 
