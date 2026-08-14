@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import signal
 
 
 # ==========================================================
@@ -296,7 +297,10 @@ def file_payload(uploaded_file):
     return {
         "name": uploaded_file.name,
         "content": base64.b64encode(content).decode("ascii"),
-        "mime": "text/csv",
+        # Prefer the browser-reported content type when Streamlit gives us
+        # one; fall back to text/csv since that's the only format this app
+        # currently accepts.
+        "mime": getattr(uploaded_file, "type", None) or "text/csv",
     }
 
 
@@ -321,7 +325,7 @@ def sync_input_signature(signature):
     st.session_state.active_input_signature = signature
 
 
-def launch_http_operation(kind, endpoint, files, data, metadata=None):
+def launch_http_operation(kind, endpoint, files, data, metadata=None, timeout=300):
     """Start API work in a separate process so the UI can be cancelled."""
 
     tmp_dir = tempfile.mkdtemp(prefix="auto_ml_operation_")
@@ -342,7 +346,10 @@ def launch_http_operation(kind, endpoint, files, data, metadata=None):
         if isinstance(value, tuple) and len(value) >= 2:
             name = value[0]
             file_obj = value[1]
-            mime = value[2] if len(value) >= 3 else "text/csv"
+            mime = (
+                value[2] if len(value) >= 3
+                else (getattr(file_obj, "type", None) or "text/csv")
+            )
 
             if hasattr(file_obj, "getvalue"):
                 content = file_obj.getvalue()
@@ -375,18 +382,28 @@ def launch_http_operation(kind, endpoint, files, data, metadata=None):
         "endpoint": endpoint,
         "files": serialized_files,
         "data": data or {},
-        "timeout": 300,
+        "timeout": timeout,
     }
 
     with open(request_path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
 
-    process = subprocess.Popen([
-        sys.executable,
-        worker,
-        request_path,
-        result_path,
-    ])
+    popen_kwargs = {}
+    if os.name == "posix":
+        # Run the worker in its own process group so cancel_current_operation
+        # can terminate it (and anything it spawns) reliably instead of
+        # only signalling the immediate child.
+        popen_kwargs["start_new_session"] = True
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            worker,
+            request_path,
+            result_path,
+        ],
+        **popen_kwargs,
+    )
 
     st.session_state.operation_process = process
     st.session_state.operation_result_path = result_path
@@ -421,11 +438,29 @@ def cleanup_operation_files():
 def cancel_current_operation():
     process = st.session_state.get("operation_process")
     if process is not None and process.poll() is None:
-        process.terminate()
+        if os.name == "posix":
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            except Exception:
+                process.terminate()
+        else:
+            process.terminate()
+
         try:
             process.wait(timeout=3)
         except Exception:
-            process.kill()
+            if os.name == "posix":
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except Exception:
+                    process.kill()
+            else:
+                process.kill()
+
+        # Note: this only stops our local worker process. If the worker had
+        # already sent the HTTP request, the backend API may continue
+        # processing server-side; there is no cancellation signal sent to
+        # it. This just makes sure we stop waiting on it and clean up.
 
     kind = st.session_state.get("operation_kind")
     st.session_state.processing_running = False
@@ -507,6 +542,17 @@ def finish_background_operation():
                     zip_file.read("pipeline_info.txt")
                     if "pipeline_info.txt" in names else None
                 )
+                # The backend always names the primary output file
+                # X_train.csv even for the single-file unsupervised flow,
+                # where it is really the whole processed dataset rather
+                # than a train split. Mirror it into processed_bytes so
+                # that state actually gets populated instead of staying
+                # None for the lifetime of the app.
+                st.session_state.processed_bytes = (
+                    st.session_state.x_test_bytes
+                    if st.session_state.x_test_bytes is not None
+                    else st.session_state.x_train_bytes
+                )
 
             st.session_state.processed = True
             st.session_state.processed_target = st.session_state.operation_metadata.get(
@@ -523,6 +569,9 @@ def finish_background_operation():
             st.session_state.operation_error = (
                 "The API returned an invalid ZIP file."
             )
+            # Don't leave a stale success message sitting alongside the
+            # error banner from a previous run.
+            st.session_state.operation_message = None
 
     cleanup_operation_files()
     return True
