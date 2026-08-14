@@ -212,6 +212,7 @@ defaults = {
     "operation_kind": None,
     "operation_metadata": {},
     "operation_message": None,
+    "operation_error_kind": None,
     "operation_error": None,
     "active_input_signature": None,
 
@@ -463,10 +464,13 @@ def cancel_current_operation():
         # it. This just makes sure we stop waiting on it and clean up.
 
     kind = st.session_state.get("operation_kind")
+
     st.session_state.processing_running = False
     st.session_state.eda_running = False
     st.session_state.operation_error = None
     st.session_state.operation_message = None
+    st.session_state.operation_error_kind = kind
+
     cleanup_operation_files()
 
     st.session_state.operation_error = (
@@ -511,6 +515,7 @@ def finish_background_operation():
         st.session_state.operation_error = result.get(
             "error", "Unknown API error"
         )
+        st.session_state.operation_error_kind = kind
         cleanup_operation_files()
         return True
 
@@ -613,7 +618,10 @@ def render_operation_lock(expected_kind=None):
         )
 
         with st.container(border=True):
-            status_col, cancel_col = st.columns([5, 1])
+            status_col, cancel_col = st.columns(
+                [5, 1],
+                vertical_alignment="center"
+            )
 
             with status_col:
                 st.warning(label)
@@ -623,8 +631,6 @@ def render_operation_lock(expected_kind=None):
                 )
 
             with cancel_col:
-                st.write("")
-                st.write("")
                 if st.button(
                     "✖ Cancel",
                     type="primary",
@@ -651,25 +657,41 @@ def _render_operation_controller():
     )
 
     with st.container(border=True):
-        st.warning(label)
-        st.caption(
-            "All controls are locked while this operation is running. "
-            "Only Cancel Operation is available."
+        status_col, cancel_col = st.columns(
+            [5, 1],
+            vertical_alignment="center"
         )
-        if st.button(
-            "✖ Cancel Operation",
-            type="primary",
-            use_container_width=True,
-            key="cancel_current_operation",
-        ):
-            cancel_current_operation()
-            st.rerun()
+
+        with status_col:
+            st.warning(label)
+            st.caption(
+                "All controls are locked while this operation is running. "
+                "Only Cancel is available."
+            )
+
+        with cancel_col:
+            if st.button(
+                "✖ Cancel",
+                type="primary",
+                use_container_width=True,
+                key="cancel_current_operation",
+            ):
+                cancel_current_operation()
+                st.rerun()
 
 def generate_eda_report_download(files, data, key):
     """Render exactly one persistent EDA control for the current workflow."""
     completed = bool(st.session_state.get("eda_generated", False))
     running = bool(st.session_state.get("eda_running", False))
     processed = bool(st.session_state.get("processed", False))
+
+    if (
+        st.session_state.get("operation_error")
+        and st.session_state.get("operation_error_kind") == "eda"
+    ):
+        st.error(st.session_state.operation_error)
+        st.session_state.operation_error = None
+        st.session_state.operation_error_kind = None
 
     if running and st.session_state.get("operation_kind") == "eda":
         render_operation_lock(expected_kind="eda")
@@ -718,9 +740,8 @@ def generate_eda_report_download(files, data, key):
         st.rerun()
 
 
-if st.session_state.operation_error:
-    st.error(st.session_state.operation_error)
-    st.session_state.operation_error = None
+# Operation errors/messages are rendered inside the
+# section that owns the operation.
 
 
 # ==========================================================
@@ -1090,6 +1111,18 @@ if ml_task == "Supervised Learning":
         # ==================================================
         # PROCESSING
         # ==================================================
+
+        if (
+            st.session_state.get("operation_error")
+            and st.session_state.get("operation_error_kind") == "process"
+        ):
+            st.error(st.session_state.operation_error)
+            st.session_state.operation_error = None
+            st.session_state.operation_error_kind = None
+
+        if st.session_state.get("operation_message"):
+            st.success(st.session_state.operation_message)
+            st.session_state.operation_message = None
 
         st.divider()
 
