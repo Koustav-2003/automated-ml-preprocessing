@@ -1,1192 +1,1211 @@
-import pandas as pd
+"""
+Automated ML preprocessing pipeline.
+
+IMPORTANT:
+    This module performs preprocessing and feature engineering only.
+    It intentionally performs NO feature selection.
+
+Supported:
+    - Supervised classification
+    - Supervised regression
+    - Unsupervised preprocessing
+
+The pipeline is leakage-safe:
+    - supervised train data is fitted first
+    - test data is transformed using the fitted train preprocessing
+    - target encoding, when used, is fitted without using the test set
+"""
+
+from __future__ import annotations
+
+import warnings
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
+import pandas as pd
 
-from scipy import stats
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import (
+    MinMaxScaler,
+    OneHotEncoder,
+    StandardScaler,
+)
+from sklearn.pipeline import Pipeline
 
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.linear_model import Lasso, LogisticRegression
-from sklearn.feature_selection import SelectFromModel
-from sklearn.model_selection import train_test_split
+warnings.filterwarnings("ignore")
 
 
 # ==========================================================
-# CORE DATA PREPROCESSOR
+# HELPERS
 # ==========================================================
 
-class DataPreprocessor:
+def _safe_numeric_columns(df: pd.DataFrame) -> List[str]:
+    return df.select_dtypes(include=np.number).columns.tolist()
+
+
+def _safe_categorical_columns(df: pd.DataFrame) -> List[str]:
+    return df.select_dtypes(
+        include=["object", "category", "bool"]
+    ).columns.tolist()
+
+
+def _make_ohe() -> OneHotEncoder:
+    """
+    sklearn compatibility helper.
+    """
+    try:
+        return OneHotEncoder(
+            handle_unknown="ignore",
+            sparse_output=False
+        )
+    except TypeError:
+        return OneHotEncoder(
+            handle_unknown="ignore",
+            sparse=False
+        )
+
+
+# ==========================================================
+# ID DETECTION
+# ==========================================================
+
+def detect_id_columns(
+    df: pd.DataFrame,
+    uniqueness_threshold: float = 0.95
+) -> List[str]:
+    """
+    Detect likely identifier columns.
+
+    These columns are excluded from model features but are returned
+    separately so they can be retained alongside processed output.
+    """
+
+    id_cols = []
+
+    for col in df.columns:
+
+        nunique = df[col].nunique(dropna=False)
+        ratio = nunique / max(len(df), 1)
+
+        name = str(col).lower()
+
+        looks_like_id = (
+            name == "id"
+            or name.endswith("_id")
+            or name.endswith("id")
+            or "identifier" in name
+        )
+
+        highly_unique = (
+            ratio >= uniqueness_threshold
+            and nunique > 10
+        )
+
+        if looks_like_id or highly_unique:
+            id_cols.append(col)
+
+    return id_cols
+
+
+# ==========================================================
+# RARE CATEGORY HANDLING
+# ==========================================================
+
+class RareCategoryGrouper(
+    BaseEstimator,
+    TransformerMixin
+):
 
     def __init__(
         self,
-        target_col=None,
-        task=None,
-        rare_label_threshold=0.01,
-        skew_threshold=0.75,
-        lasso_alpha=0.0005,
-        logistic_c=1.0,
-        scale_features=True
+        min_frequency: float = 0.01,
+        replacement: str = "__RARE__"
     ):
+        self.min_frequency = min_frequency
+        self.replacement = replacement
 
-        self.target_col = target_col
-        self.task = task
+    def fit(self, X, y=None):
 
-        self.rare_label_threshold = rare_label_threshold
+        X = pd.DataFrame(X).copy()
+
+        self.columns_ = X.columns.tolist()
+        self.frequent_categories_ = {}
+
+        for col in self.columns_:
+
+            counts = (
+                X[col]
+                .value_counts(
+                    normalize=True,
+                    dropna=True
+                )
+            )
+
+            self.frequent_categories_[col] = set(
+                counts[
+                    counts >= self.min_frequency
+                ].index
+            )
+
+        return self
+
+    def transform(self, X):
+
+        X = pd.DataFrame(
+            X,
+            columns=self.columns_
+        ).copy()
+
+        for col in self.columns_:
+
+            allowed = self.frequent_categories_.get(
+                col,
+                set()
+            )
+
+            X[col] = X[col].where(
+                X[col].isin(allowed),
+                self.replacement
+            )
+
+        return X
+
+
+# ==========================================================
+# SKEW / LOG TRANSFORMATION
+# ==========================================================
+
+class SkewedLogTransformer(
+    BaseEstimator,
+    TransformerMixin
+):
+
+    def __init__(
+        self,
+        skew_threshold: float = 1.0
+    ):
         self.skew_threshold = skew_threshold
 
-        self.lasso_alpha = lasso_alpha
-        self.logistic_c = logistic_c
+    def fit(self, X, y=None):
 
-        self.scale_features = scale_features
+        X = pd.DataFrame(X).copy()
 
-        # ==================================================
-        # GENERAL STATE
-        # ==================================================
+        self.columns_ = X.columns.tolist()
+        self.log_columns_ = []
 
-        self.id_cols = []
+        for col in self.columns_:
 
-        self.features_with_nan = []
-        self.features_nan_cat = []
-        self.features_nan_num = []
+            series = pd.to_numeric(
+                X[col],
+                errors="coerce"
+            )
 
-        self.train_medians = {}
+            if series.dropna().empty:
+                continue
 
-        self.frequent_labels = {}
-        self.categorical_features = []
+            skew = series.skew()
 
-        self.skewed_features = []
-        self.skew_shifts = {}
+            if pd.notna(skew) and abs(skew) > self.skew_threshold:
 
-        self.feature_columns = []
-        self.scalable_features = []
+                # Log1p is valid for non-negative values.
+                # For negative values, shift by the train minimum.
+                minimum = series.min()
 
-        self.scaler = None
+                if pd.notna(minimum):
+
+                    self.log_columns_.append(col)
+
+        self.shifts_ = {}
+
+        for col in self.log_columns_:
+
+            series = pd.to_numeric(
+                X[col],
+                errors="coerce"
+            )
+
+            minimum = series.min()
+
+            self.shifts_[col] = (
+                -minimum
+                if pd.notna(minimum) and minimum < 0
+                else 0.0
+            )
+
+        return self
+
+    def transform(self, X):
+
+        X = pd.DataFrame(
+            X,
+            columns=self.columns_
+        ).copy()
+
+        for col in self.log_columns_:
+
+            values = pd.to_numeric(
+                X[col],
+                errors="coerce"
+            )
+
+            shift = self.shifts_.get(
+                col,
+                0.0
+            )
+
+            values = values + shift
+
+            # Numerical safety.
+            values = values.clip(
+                lower=0
+            )
+
+            X[col] = np.log1p(values)
+
+        return X
+
+
+# ==========================================================
+# TARGET ENCODING
+# ==========================================================
+
+class LeaveOneOutTargetEncoder(
+    BaseEstimator,
+    TransformerMixin
+):
+    """
+    Leave-one-out target encoding for supervised categorical features.
+
+    During fit_transform on training data, each training row excludes its
+    own target from the category statistic.
+
+    During transform (e.g. test data), learned category statistics are used.
+    """
+
+    def __init__(
+        self,
+        smoothing: float = 10.0
+    ):
+        self.smoothing = smoothing
+
+    def fit(self, X, y):
+
+        X = pd.DataFrame(X).copy()
+        y = pd.Series(y).reset_index(drop=True)
+
+        self.columns_ = X.columns.tolist()
+
+        # Classification labels are encoded to stable numeric values.
+        self.global_mean_ = float(
+            pd.to_numeric(
+                y,
+                errors="coerce"
+            ).mean()
+        )
+
+        if pd.isna(self.global_mean_):
+            self.global_mean_ = 0.0
+
+        self.mapping_ = {}
+
+        for col in self.columns_:
+
+            temp = pd.DataFrame({
+                "category": X[col].reset_index(drop=True),
+                "target": y
+            })
+
+            stats = (
+                temp.groupby(
+                    "category",
+                    dropna=False
+                )["target"]
+                .agg(["mean", "count"])
+            )
+
+            smooth = (
+                stats["count"] * stats["mean"]
+                + self.smoothing * self.global_mean_
+            ) / (
+                stats["count"]
+                + self.smoothing
+            )
+
+            self.mapping_[col] = smooth.to_dict()
+
+        return self
+
+    def fit_transform(self, X, y=None, **fit_params):
+
+        if y is None:
+            return self.fit(X, y).transform(X)
+
+        X = pd.DataFrame(X).copy()
+        y_series = pd.Series(y).reset_index(drop=True)
+
+        self.fit(X, y_series)
+
+        output = pd.DataFrame(
+            index=X.index
+        )
+
+        for col in self.columns_:
+
+            values = X[col].reset_index(drop=True)
+
+            target_values = y_series
+
+            global_mean = self.global_mean_
+
+            sums = (
+                pd.DataFrame({
+                    "category": values,
+                    "target": target_values
+                })
+                .groupby(
+                    "category",
+                    dropna=False
+                )["target"]
+                .transform("sum")
+            )
+
+            counts = (
+                pd.DataFrame({
+                    "category": values
+                })
+                .groupby(
+                    "category",
+                    dropna=False
+                )["category"]
+                .transform("count")
+            )
+
+            loo_sum = sums - target_values
+            loo_count = counts - 1
+
+            encoded = (
+                loo_sum
+                + self.smoothing * global_mean
+            ) / (
+                loo_count
+                + self.smoothing
+            )
+
+            output[col] = encoded.fillna(
+                global_mean
+            ).to_numpy()
+
+        return output
+
+    def transform(self, X):
+
+        X = pd.DataFrame(
+            X,
+            columns=self.columns_
+        ).copy()
+
+        output = pd.DataFrame(
+            index=X.index
+        )
+
+        for col in self.columns_:
+
+            mapping = self.mapping_.get(
+                col,
+                {}
+            )
+
+            output[col] = (
+                X[col]
+                .map(mapping)
+                .fillna(self.global_mean_)
+                .astype(float)
+            )
+
+        return output
+
+
+# ==========================================================
+# BASE PREPROCESSOR
+# ==========================================================
+
+class BasePreprocessor:
+    """
+    Shared preprocessing utilities.
+
+    NO FEATURE SELECTION is performed here.
+    """
+
+    def __init__(
+        self,
+        test_size: float = 0.20,
+        random_state: int = 42
+    ):
+
+        self.test_size = test_size
+        self.random_state = random_state
+
+        self.id_cols: List[str] = []
+        self.numeric_cols: List[str] = []
+        self.categorical_cols: List[str] = []
+
+        self.feature_columns: List[str] = []
+        self.output_columns: List[str] = []
 
         self.fitted = False
 
-        # ==================================================
-        # SUPERVISED STATE
-        # ==================================================
+    # ------------------------------------------------------
+    # DATA SPLITTING
+    # ------------------------------------------------------
 
-        self.label_mappings = {}
-        self.global_target_mean = None
+    def split_ids(
+        self,
+        df: pd.DataFrame
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
-        self.feature_selector = None
-        self.selected_features = []
+        self.id_cols = detect_id_columns(df)
 
-        # ==================================================
-        # UNSUPERVISED STATE
-        # ==================================================
+        ids = df[
+            self.id_cols
+        ].copy() if self.id_cols else pd.DataFrame(
+            index=df.index
+        )
 
-        self.one_hot_categories = {}
-        self.unsupervised_feature_columns = []
+        X = df.drop(
+            columns=self.id_cols,
+            errors="ignore"
+        ).copy()
 
-        # ==================================================
-        # FEATURE COUNTS
-        # ==================================================
+        return X, ids
 
-        self.feature_count_before_processing = 0
-        self.feature_count_after_encoding = 0
-        self.feature_count_after_selection = 0
+    # ------------------------------------------------------
+    # FEATURE TYPE DETECTION
+    # ------------------------------------------------------
 
-    # ======================================================
-    # CATEGORICAL FEATURES
-    # ======================================================
+    def detect_feature_types(
+        self,
+        X: pd.DataFrame
+    ):
 
-    def _get_categorical_features(self, X):
+        self.numeric_cols = _safe_numeric_columns(X)
+        self.categorical_cols = _safe_categorical_columns(X)
 
-        return [
-            col
-            for col in X.columns
-            if (
-                pd.api.types.is_object_dtype(X[col])
-                or pd.api.types.is_string_dtype(X[col])
-                or isinstance(
-                    X[col].dtype,
-                    pd.CategoricalDtype
-                )
-            )
-        ]
+        self.feature_columns = X.columns.tolist()
 
-    # ======================================================
+    # ------------------------------------------------------
+    # METADATA
+    # ------------------------------------------------------
+
+    def get_info(self) -> Dict:
+
+        return {
+            "id_columns": self.id_cols,
+            "numeric_columns": self.numeric_cols,
+            "categorical_columns": self.categorical_cols,
+            "feature_count_before_processing":
+                len(self.feature_columns),
+            "final_feature_count":
+                len(self.output_columns),
+            "feature_selection": False,
+            "feature_selection_removed": 0,
+        }
+
+
+# ==========================================================
+# SUPERVISED PREPROCESSOR
+# ==========================================================
+
+class SupervisedPreprocessor(
+    BasePreprocessor
+):
+
+    def __init__(
+        self,
+        target_col: Optional[str] = None,
+        test_size: float = 0.20,
+        random_state: int = 42,
+        rare_min_frequency: float = 0.01,
+        skew_threshold: float = 1.0
+    ):
+
+        super().__init__(
+            test_size=test_size,
+            random_state=random_state
+        )
+
+        self.target_col = target_col
+        self.rare_min_frequency = rare_min_frequency
+        self.skew_threshold = skew_threshold
+
+        self.task = None
+
+        self.numeric_pipeline = None
+        self.categorical_pipeline = None
+
+        self.encoder = None
+        self.scaler = None
+
+        self.numeric_after_log = []
+        self.categorical_encoding = "target_encoding"
+
+    # ------------------------------------------------------
     # TASK DETECTION
-    # ======================================================
+    # ------------------------------------------------------
 
-    def detect_task(self, y):
+    def detect_task(
+        self,
+        y: pd.Series
+    ) -> str:
 
         if (
             pd.api.types.is_object_dtype(y)
             or pd.api.types.is_string_dtype(y)
             or pd.api.types.is_bool_dtype(y)
+            or pd.api.types.is_categorical_dtype(y)
         ):
             return "classification"
 
         if pd.api.types.is_numeric_dtype(y):
 
-            if y.nunique(dropna=True) <= 20:
-                return "classification"
-
-            return "regression"
+            # Keep the notebook-style practical heuristic.
+            return (
+                "classification"
+                if y.nunique(dropna=True) <= 20
+                else "regression"
+            )
 
         return "classification"
 
-    # Backward-compatible internal name.
-    def _detect_task(self, y):
-        return self.detect_task(y)
+    # ------------------------------------------------------
+    # FIT
+    # ------------------------------------------------------
 
-    # ======================================================
-    # ID DETECTION
-    # ======================================================
-
-    def _detect_ids(self, X):
-
-        self.id_cols = []
-
-        for col in X.columns:
-
-            if X[col].nunique(dropna=False) == len(X):
-                self.id_cols.append(col)
-
-        return self.id_cols
-
-    # ======================================================
-    # MISSING VALUE DETECTION
-    # ======================================================
-
-    def _detect_missing_features(self, X):
-
-        self.features_with_nan = [
-            col
-            for col in X.columns
-            if X[col].isnull().sum() > 0
-        ]
-
-        self.features_nan_num = [
-            col
-            for col in self.features_with_nan
-            if pd.api.types.is_numeric_dtype(X[col])
-        ]
-
-        self.features_nan_cat = [
-            col
-            for col in self.features_with_nan
-            if col not in self.features_nan_num
-        ]
-
-    # ======================================================
-    # MISSING VALUE INDICATORS
-    # ======================================================
-
-    def _add_missing_indicators(self, X):
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series
+    ):
 
         X = X.copy()
+        y = pd.Series(y).reset_index(drop=True)
+        X = X.reset_index(drop=True)
 
-        for feature in self.features_with_nan:
+        self.detect_feature_types(X)
+        self.task = self.detect_task(y)
 
-            if feature not in X.columns:
-                continue
+        # -----------------------------
+        # NUMERICAL
+        # -----------------------------
 
-            X[f"{feature}_nan"] = (
-                X[feature].isnull().astype(int)
-            )
-
-        return X
-
-    # ======================================================
-    # IMPUTATION
-    # ======================================================
-
-    def _fit_imputation(self, X):
-
-        self.train_medians = {}
-
-        for feature in self.features_nan_num:
-
-            if feature not in X.columns:
-                continue
-
-            median_value = X[feature].median()
-
-            if pd.isna(median_value):
-                median_value = 0
-
-            self.train_medians[feature] = median_value
-
-    def _apply_imputation(self, X):
-
-        X = X.copy()
-
-        for feature in self.features_nan_num:
-
-            if feature not in X.columns:
-                continue
-
-            value = self.train_medians.get(
-                feature,
-                0
-            )
-
-            X[feature] = X[feature].fillna(value)
-
-        for feature in self.features_nan_cat:
-
-            if feature not in X.columns:
-                continue
-
-            X[feature] = (
-                X[feature]
-                .fillna("Missing")
-                .astype(str)
-            )
-
-        return X
-
-    # ======================================================
-    # RARE CATEGORY HANDLING
-    # ======================================================
-
-    def _fit_rare_labels(self, X):
-
-        self.categorical_features = (
-            self._get_categorical_features(X)
+        self.numeric_imputer = SimpleImputer(
+            strategy="median"
         )
 
-        self.frequent_labels = {}
+        X_num = pd.DataFrame(
+            self.numeric_imputer.fit_transform(
+                X[self.numeric_cols]
+            ),
+            columns=self.numeric_cols
+        )
 
-        for feature in self.categorical_features:
+        self.log_transformer = SkewedLogTransformer(
+            skew_threshold=self.skew_threshold
+        )
 
-            frequencies = (
-                X[feature]
-                .value_counts(normalize=True)
+        X_num = self.log_transformer.fit_transform(
+            X_num
+        )
+
+        self.numeric_after_log = (
+            self.log_transformer.log_columns_
+        )
+
+        # -----------------------------
+        # CATEGORICAL
+        # -----------------------------
+
+        self.categorical_imputer = SimpleImputer(
+            strategy="most_frequent"
+        )
+
+        if self.categorical_cols:
+
+            X_cat = pd.DataFrame(
+                self.categorical_imputer.fit_transform(
+                    X[self.categorical_cols]
+                ),
+                columns=self.categorical_cols
             )
 
-            frequent = frequencies[
-                frequencies >= self.rare_label_threshold
-            ].index.tolist()
-
-            self.frequent_labels[feature] = frequent
-
-    def _apply_rare_labels(self, X):
-
-        X = X.copy()
-
-        for feature, frequent in (
-            self.frequent_labels.items()
-        ):
-
-            if feature not in X.columns:
-                continue
-
-            X[feature] = np.where(
-                X[feature].isin(frequent),
-                X[feature],
-                "Rare"
+            self.rare_grouper = RareCategoryGrouper(
+                min_frequency=self.rare_min_frequency
             )
 
-        return X
+            X_cat = self.rare_grouper.fit_transform(
+                X_cat
+            )
 
-    # ======================================================
-    # SKEWNESS
-    # ======================================================
+            # Target encoding is retained as the supervised
+            # categorical feature-engineering method.
+            #
+            # For classification, encode target labels to numeric codes
+            # before fitting the encoder.
+            y_encoder = y.copy()
 
-    def _fit_skewness(self, X):
+            if self.task == "classification":
+                self.target_classes_ = pd.Index(
+                    y_encoder.dropna().unique()
+                )
 
-        self.skewed_features = []
-        self.skew_shifts = {}
-
-        numerical_features = [
-            col
-            for col in X.columns
-            if pd.api.types.is_numeric_dtype(X[col])
-        ]
-
-        for feature in numerical_features:
-
-            series = X[feature].dropna()
-
-            if len(series) < 3:
-                continue
-
-            skew_value = stats.skew(series)
-
-            if abs(skew_value) > self.skew_threshold:
-
-                self.skewed_features.append(feature)
-
-                minimum = series.min()
-
-                if minimum < 0:
-                    self.skew_shifts[feature] = (
-                        abs(minimum) + 1
+                class_map = {
+                    value: i
+                    for i, value in enumerate(
+                        self.target_classes_
                     )
-                else:
-                    self.skew_shifts[feature] = 0
+                }
 
-    def _apply_skewness(self, X):
+                y_encoder = y_encoder.map(
+                    class_map
+                )
 
-        X = X.copy()
+            else:
+                y_encoder = pd.to_numeric(
+                    y_encoder,
+                    errors="coerce"
+                )
 
-        for feature in self.skewed_features:
+            self.encoder = LeaveOneOutTargetEncoder()
 
-            if feature not in X.columns:
-                continue
-
-            shift = self.skew_shifts.get(
-                feature,
-                0
+            self.encoder.fit(
+                X_cat,
+                y_encoder
             )
 
-            if shift > 0:
+        # -----------------------------
+        # SCALER
+        # -----------------------------
 
-                X[feature] = np.log1p(
-                    X[feature] + shift
+        self.scaler = MinMaxScaler()
+
+        transformed = self._transform_core(
+            X,
+            y=y,
+            fit_training=True
+        )
+
+        self.output_columns = transformed.columns.tolist()
+
+        self.fitted = True
+
+        return self
+
+    # ------------------------------------------------------
+    # TRANSFORM
+    # ------------------------------------------------------
+
+    def _transform_core(
+        self,
+        X: pd.DataFrame,
+        y: Optional[pd.Series] = None,
+        fit_training: bool = False
+    ):
+
+        X = X.copy().reset_index(drop=True)
+
+        parts = []
+
+        # Numerical
+        if self.numeric_cols:
+
+            X_num = pd.DataFrame(
+                self.numeric_imputer.transform(
+                    X[self.numeric_cols]
+                ),
+                columns=self.numeric_cols
+            )
+
+            X_num = self.log_transformer.transform(
+                X_num
+            )
+
+            parts.append(
+                X_num.reset_index(drop=True)
+            )
+
+        # Categorical -> target encoded
+        if self.categorical_cols:
+
+            X_cat = pd.DataFrame(
+                self.categorical_imputer.transform(
+                    X[self.categorical_cols]
+                ),
+                columns=self.categorical_cols
+            )
+
+            X_cat = self.rare_grouper.transform(
+                X_cat
+            )
+
+            if fit_training and y is not None:
+
+                y_encoder = pd.Series(y).reset_index(
+                    drop=True
+                )
+
+                if self.task == "classification":
+
+                    class_map = {
+                        value: i
+                        for i, value in enumerate(
+                            self.target_classes_
+                        )
+                    }
+
+                    y_encoder = y_encoder.map(
+                        class_map
+                    )
+
+                else:
+
+                    y_encoder = pd.to_numeric(
+                        y_encoder,
+                        errors="coerce"
+                    )
+
+                X_cat_encoded = (
+                    self.encoder.fit_transform(
+                        X_cat,
+                        y_encoder
+                    )
                 )
 
             else:
 
-                X[feature] = np.log1p(
-                    X[feature]
+                X_cat_encoded = (
+                    self.encoder.transform(
+                        X_cat
+                    )
                 )
 
-        return X
+            X_cat_encoded.columns = [
+                f"{col}__target_encoded"
+                for col in self.categorical_cols
+            ]
 
-    # ======================================================
-    # SUPERVISED TARGET ENCODING
-    # ======================================================
-
-    def _fit_target_encoding(self, X, y):
-
-        categorical_features = (
-            self._get_categorical_features(X)
-        )
-
-        self.categorical_features = (
-            categorical_features
-        )
-
-        self.global_target_mean = y.mean()
-
-        self.label_mappings = {}
-
-        for feature in categorical_features:
-
-            temp = pd.DataFrame({
-                "category": X[feature].values,
-                "target": np.asarray(y)
-            })
-
-            grouped = (
-                temp
-                .groupby("category")["target"]
-                .agg(["sum", "count"])
+            parts.append(
+                X_cat_encoded.reset_index(drop=True)
             )
 
-            self.label_mappings[feature] = (
-                grouped.to_dict("index")
-            )
-
-    def _apply_target_encoding_train(
-        self,
-        X,
-        y
-    ):
-
-        X = X.copy()
-
-        y_array = np.asarray(y)
-
-        for feature in self.categorical_features:
-
-            if feature not in X.columns:
-                continue
-
-            mapping = self.label_mappings[feature]
-
-            encoded_values = []
-
-            for i, category in enumerate(
-                X[feature].values
-            ):
-
-                if category in mapping:
-
-                    category_sum = (
-                        mapping[category]["sum"]
-                    )
-
-                    category_count = (
-                        mapping[category]["count"]
-                    )
-
-                    # Leave-one-out target encoding:
-                    # the current row's target is excluded.
-                    other_sum = (
-                        category_sum - y_array[i]
-                    )
-
-                    other_count = (
-                        category_count - 1
-                    )
-
-                    if other_count > 0:
-
-                        value = (
-                            other_sum / other_count
-                        )
-
-                    else:
-
-                        value = (
-                            self.global_target_mean
-                        )
-
-                else:
-
-                    value = (
-                        self.global_target_mean
-                    )
-
-                encoded_values.append(value)
-
-            X[feature] = encoded_values
-
-        return X
-
-    def _apply_target_encoding(self, X):
-
-        X = X.copy()
-
-        for feature in self.categorical_features:
-
-            if feature not in X.columns:
-                continue
-
-            mapping = self.label_mappings[feature]
-
-            def encode_value(category):
-
-                if category not in mapping:
-                    return self.global_target_mean
-
-                category_sum = (
-                    mapping[category]["sum"]
-                )
-
-                category_count = (
-                    mapping[category]["count"]
-                )
-
-                return (
-                    category_sum / category_count
-                )
-
-            X[feature] = (
-                X[feature]
-                .map(encode_value)
-                .fillna(self.global_target_mean)
-            )
-
-        return X
-
-    # ======================================================
-    # UNSUPERVISED ONE-HOT ENCODING
-    # ======================================================
-
-    def _fit_one_hot_encoding(self, X):
-
-        self.one_hot_categories = {}
-
-        categorical_features = (
-            self._get_categorical_features(X)
-        )
-
-        for feature in categorical_features:
-
-            categories = (
-                X[feature]
-                .astype(str)
-                .unique()
-                .tolist()
-            )
-
-            self.one_hot_categories[feature] = (
-                categories
-            )
-
-    def _apply_one_hot_encoding(self, X):
-
-        X = X.copy()
-
-        for feature, categories in (
-            self.one_hot_categories.items()
-        ):
-
-            if feature not in X.columns:
-
-                for category in categories:
-
-                    X[
-                        f"{feature}_{category}"
-                    ] = 0
-
-                continue
-
-            values = X[feature].astype(str)
-
-            for category in categories:
-
-                X[
-                    f"{feature}_{category}"
-                ] = (
-                    values == str(category)
-                ).astype(int)
-
-            X = X.drop(
-                columns=[feature]
-            )
-
-        return X
-
-    # ======================================================
-    # NUMERIC VALIDATION
-    # ======================================================
-
-    def _ensure_numeric(self, X):
-
-        X = X.copy()
-
-        categorical_features = (
-            self._get_categorical_features(X)
-        )
-
-        if categorical_features:
-
-            raise ValueError(
-                "Categorical features remain "
-                "before scaling: "
-                f"{categorical_features}"
-            )
-
-        boolean_features = [
-            col
-            for col in X.columns
-            if pd.api.types.is_bool_dtype(X[col])
-        ]
-
-        for feature in boolean_features:
-            X[feature] = X[feature].astype(int)
-
-        non_numeric_features = [
-            col
-            for col in X.columns
-            if not pd.api.types.is_numeric_dtype(X[col])
-        ]
-
-        if non_numeric_features:
-
-            raise ValueError(
-                "Non-numeric features remain "
-                "before scaling: "
-                f"{non_numeric_features}"
-            )
-
-        return X
-
-    # ======================================================
-    # FEATURE ALIGNMENT
-    # ======================================================
-
-    def _align_features(self, X):
-
-        X = X.copy()
-
-        for feature in self.feature_columns:
-
-            if feature not in X.columns:
-                X[feature] = 0
-
-        X = X[self.feature_columns]
-
-        return X
-
-    # ======================================================
-    # SCALING
-    # ======================================================
-
-    def _fit_scaler(self, X):
-
-        self.scalable_features = [
-            col
-            for col in X.columns
-            if pd.api.types.is_numeric_dtype(X[col])
-        ]
-
-        if not self.scale_features:
-
-            self.scaler = None
-            return
-
-        self.scaler = MinMaxScaler()
-
-        if self.scalable_features:
-
-            self.scaler.fit(
-                X[self.scalable_features]
-            )
-
-    def _apply_scaling(self, X):
-
-        X = X.copy()
-
-        if not self.scale_features:
-            return X
-
-        if self.scaler is None:
-            return X
-
-        if not self.scalable_features:
-            return X
-
-        X[self.scalable_features] = (
-            self.scaler.transform(
-                X[self.scalable_features]
-            )
-        )
-
-        return X
-
-    # ======================================================
-    # SUPERVISED FEATURE SELECTION
-    # ======================================================
-
-    def _fit_feature_selector(self, X, y):
-
-        if self.task == "regression":
-
-            estimator = Lasso(
-                alpha=self.lasso_alpha,
-                max_iter=10000
-            )
-
-        elif self.task == "classification":
-
-            estimator = LogisticRegression(
-                penalty="l1",
-                solver="liblinear",
-                C=self.logistic_c,
-                max_iter=5000
+        if parts:
+
+            X_out = pd.concat(
+                parts,
+                axis=1
             )
 
         else:
 
-            raise ValueError(
-                f"Unsupported task: {self.task}"
+            X_out = pd.DataFrame(
+                index=X.index
             )
 
-        self.feature_selector = SelectFromModel(
-            estimator=estimator,
-            threshold="mean"
+        # Fit scaler only on training data.
+        if fit_training:
+
+            scaled = self.scaler.fit_transform(
+                X_out
+            )
+
+        else:
+
+            scaled = self.scaler.transform(
+                X_out
+            )
+
+        X_out = pd.DataFrame(
+            scaled,
+            columns=X_out.columns
         )
 
-        self.feature_selector.fit(
-            X,
+        return X_out
+
+    def fit_transform(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series
+    ):
+
+        X_no_ids, ids = self.split_ids(X)
+
+        self.fit(
+            X_no_ids,
             y
         )
 
-        support = (
-            self.feature_selector
-            .get_support()
+        processed = self._transform_core(
+            X_no_ids,
+            y=y,
+            fit_training=True
         )
 
-        self.selected_features = [
-            feature
-            for feature, selected
-            in zip(
-                X.columns,
-                support
-            )
-            if selected
-        ]
+        return processed, ids
 
-        if not self.selected_features:
-
-            raise ValueError(
-                "Feature selection removed all "
-                "features. Try changing "
-                "lasso_alpha or logistic_c."
-            )
-
-    def _apply_feature_selection(self, X):
-
-        X = X.copy()
-
-        for feature in self.selected_features:
-
-            if feature not in X.columns:
-                X[feature] = 0
-
-        return X[self.selected_features]
-
-    # ======================================================
-    # SUPERVISED FIT
-    # ======================================================
-
-    def fit(self, X_train, y_train):
-
-        if y_train is None:
-
-            raise ValueError(
-                "Target values are required "
-                "for supervised preprocessing."
-            )
-
-        X_train = X_train.copy()
-
-        self.feature_count_before_processing = (
-            X_train.shape[1]
-        )
-
-        self.task = (
-            self.task
-            if self.task is not None
-            else self.detect_task(y_train)
-        )
-
-        self._detect_ids(X_train)
-
-        X = X_train.drop(
-            columns=self.id_cols,
-            errors="ignore"
-        )
-
-        self._detect_missing_features(X)
-
-        self._fit_imputation(X)
-
-        self._fit_rare_labels(X)
-
-        X_temp = self._apply_imputation(X)
-
-        X_temp = self._apply_rare_labels(
-            X_temp
-        )
-
-        self._fit_skewness(X_temp)
-
-        X_temp = self._apply_skewness(
-            X_temp
-        )
-
-        self._fit_target_encoding(
-            X_temp,
-            y_train
-        )
-
-        X_temp = (
-            self._apply_target_encoding_train(
-                X_temp,
-                y_train
-            )
-        )
-
-        X_temp = self._ensure_numeric(
-            X_temp
-        )
-
-        self.feature_columns = (
-            X_temp.columns.tolist()
-        )
-
-        self.feature_count_after_encoding = (
-            len(self.feature_columns)
-        )
-
-        self._fit_scaler(X_temp)
-
-        X_temp = self._apply_scaling(
-            X_temp
-        )
-
-        self._fit_feature_selector(
-            X_temp,
-            y_train
-        )
-
-        self.feature_count_after_selection = (
-            len(self.selected_features)
-        )
-
-        self.fitted = True
-
-        return self
-
-    # ======================================================
-    # SUPERVISED TRANSFORM
-    # ======================================================
-
-    def transform(self, X):
+    def transform(
+        self,
+        X: pd.DataFrame
+    ):
 
         if not self.fitted:
-
             raise RuntimeError(
-                "Pipeline has not been fitted yet."
+                "Preprocessor must be fitted before transform()."
             )
 
-        X = X.copy()
-
-        ids = pd.DataFrame(
-            index=X.index
-        )
-
-        for col in self.id_cols:
-
-            if col in X.columns:
-                ids[col] = X[col]
-
-        X = X.drop(
+        X_no_ids = X.drop(
             columns=self.id_cols,
             errors="ignore"
-        )
+        ).copy()
 
-        X = self._add_missing_indicators(X)
-
-        X = self._apply_imputation(X)
-
-        X = self._apply_rare_labels(X)
-
-        X = self._apply_skewness(X)
-
-        X = self._apply_target_encoding(X)
-
-        X = self._align_features(X)
-
-        X = self._ensure_numeric(X)
-
-        X = self._apply_scaling(X)
-
-        X = self._apply_feature_selection(X)
-
-        return X, ids
-
-    # ======================================================
-    # SUPERVISED FIT TRANSFORM
-    # ======================================================
-
-    def fit_transform(self, X_train, y_train):
-
-        self.fit(
-            X_train,
-            y_train
-        )
-
-        X = X_train.copy()
-
-        X = X.drop(
-            columns=self.id_cols,
-            errors="ignore"
-        )
-
-        X = self._add_missing_indicators(X)
-
-        X = self._apply_imputation(X)
-
-        X = self._apply_rare_labels(X)
-
-        X = self._apply_skewness(X)
-
-        X = self._apply_target_encoding_train(
-            X,
-            y_train
-        )
-
-        X = self._align_features(X)
-
-        X = self._ensure_numeric(X)
-
-        X = self._apply_scaling(X)
-
-        X = self._apply_feature_selection(X)
-
-        return X
-
-    # ======================================================
-    # UNSUPERVISED FIT
-    # ======================================================
-
-    def fit_unsupervised(self, X):
-
-        X = X.copy()
-
-        self.feature_count_before_processing = (
-            X.shape[1]
-        )
-
-        self._detect_ids(X)
-
-        X = X.drop(
-            columns=self.id_cols,
-            errors="ignore"
-        )
-
-        self._detect_missing_features(X)
-
-        self._fit_imputation(X)
-
-        X = self._apply_imputation(X)
-
-        self._fit_rare_labels(X)
-
-        X = self._apply_rare_labels(X)
-
-        self._fit_skewness(X)
-
-        X = self._apply_skewness(X)
-
-        self._fit_one_hot_encoding(X)
-
-        X = self._apply_one_hot_encoding(X)
-
-        X = self._ensure_numeric(X)
-
-        self.feature_columns = (
-            X.columns.tolist()
-        )
-
-        self.unsupervised_feature_columns = (
-            X.columns.tolist()
-        )
-
-        self.feature_count_after_encoding = (
-            len(self.feature_columns)
-        )
-
-        self._fit_scaler(X)
-
-        self.task = "unsupervised"
-
-        self.selected_features = (
-            self.feature_columns.copy()
-        )
-
-        self.feature_count_after_selection = (
-            len(self.selected_features)
-        )
-
-        self.fitted = True
-
-        return self
-
-    # ======================================================
-    # UNSUPERVISED TRANSFORM
-    # ======================================================
-
-    def transform_unsupervised(self, X):
-
-        if not self.fitted:
-
-            raise RuntimeError(
-                "Unsupervised pipeline has "
-                "not been fitted yet."
+        ids = (
+            X[self.id_cols].copy()
+            if self.id_cols
+            else pd.DataFrame(
+                index=X.index
             )
-
-        X = X.copy()
-
-        ids = pd.DataFrame(
-            index=X.index
         )
 
-        for col in self.id_cols:
-
-            if col in X.columns:
-                ids[col] = X[col]
-
-        X = X.drop(
-            columns=self.id_cols,
-            errors="ignore"
+        processed = self._transform_core(
+            X_no_ids,
+            y=None,
+            fit_training=False
         )
 
-        X = self._add_missing_indicators(X)
-
-        X = self._apply_imputation(X)
-
-        X = self._apply_rare_labels(X)
-
-        X = self._apply_skewness(X)
-
-        X = self._apply_one_hot_encoding(X)
-
-        X = self._align_features(X)
-
-        X = self._ensure_numeric(X)
-
-        X = self._apply_scaling(X)
-
-        return X, ids
-
-    # ======================================================
-    # UNSUPERVISED FIT TRANSFORM
-    # ======================================================
-
-    def fit_transform_unsupervised(self, X):
-
-        self.fit_unsupervised(X)
-
-        X_processed, _ = (
-            self.transform_unsupervised(X)
-        )
-
-        return X_processed
-
-    # ======================================================
-    # PIPELINE INFORMATION
-    # ======================================================
+        return processed, ids
 
     def get_info(self):
 
-        if not self.fitted:
+        info = super().get_info()
 
-            raise RuntimeError(
-                "Pipeline has not been fitted yet."
+        info.update({
+            "task": self.task,
+            "target_column": self.target_col,
+            "numeric_log_transformed":
+                self.numeric_after_log,
+            "categorical_encoding":
+                self.categorical_encoding,
+            "feature_selection": False,
+            "feature_selection_removed": 0,
+            "final_feature_count":
+                len(self.output_columns),
+        })
+
+        return info
+
+
+# ==========================================================
+# UNSUPERVISED PREPROCESSOR
+# ==========================================================
+
+class UnsupervisedPreprocessor(
+    BasePreprocessor
+):
+
+    def __init__(
+        self,
+        test_size: float = 0.20,
+        random_state: int = 42,
+        rare_min_frequency: float = 0.01,
+        skew_threshold: float = 1.0
+    ):
+
+        super().__init__(
+            test_size=test_size,
+            random_state=random_state
+        )
+
+        self.rare_min_frequency = rare_min_frequency
+        self.skew_threshold = skew_threshold
+
+        self.scaler = None
+        self.encoder = None
+
+    # ------------------------------------------------------
+    # FIT
+    # ------------------------------------------------------
+
+    def fit(
+        self,
+        X: pd.DataFrame
+    ):
+
+        X = X.copy().reset_index(drop=True)
+
+        self.detect_feature_types(X)
+
+        # Numerical
+        self.numeric_imputer = SimpleImputer(
+            strategy="median"
+        )
+
+        X_num = pd.DataFrame(
+            self.numeric_imputer.fit_transform(
+                X[self.numeric_cols]
+            ),
+            columns=self.numeric_cols
+        )
+
+        self.log_transformer = SkewedLogTransformer(
+            skew_threshold=self.skew_threshold
+        )
+
+        X_num = self.log_transformer.fit_transform(
+            X_num
+        )
+
+        # Categorical
+        if self.categorical_cols:
+
+            self.categorical_imputer = SimpleImputer(
+                strategy="most_frequent"
             )
 
-        return {
-
-            "task":
-                self.task,
-
-            "target":
-                (
-                    self.target_col
-                    if self.target_col is not None
-                    else "None"
+            X_cat = pd.DataFrame(
+                self.categorical_imputer.fit_transform(
+                    X[self.categorical_cols]
                 ),
+                columns=self.categorical_cols
+            )
 
-            "id_columns":
-                self.id_cols,
+            self.rare_grouper = RareCategoryGrouper(
+                min_frequency=self.rare_min_frequency
+            )
 
-            "missing_value_features":
-                self.features_with_nan,
+            X_cat = self.rare_grouper.fit_transform(
+                X_cat
+            )
 
-            "numeric_missing_features":
-                self.features_nan_num,
+            self.encoder = _make_ohe()
 
-            "categorical_missing_features":
-                self.features_nan_cat,
+            self.encoder.fit(
+                X_cat
+            )
 
-            "skewed_features":
-                self.skewed_features,
+        # Fit scaler on the complete transformed training matrix.
+        X_out = self._transform_core(
+            X,
+            fit_scaler=True
+        )
 
-            "scaled_features":
-                self.scalable_features,
+        self.output_columns = X_out.columns.tolist()
+        self.fitted = True
 
-            "feature_count_before_processing":
-                self.feature_count_before_processing,
+        return self
 
-            "feature_count_after_encoding":
-                self.feature_count_after_encoding,
+    # ------------------------------------------------------
+    # TRANSFORM
+    # ------------------------------------------------------
 
-            "original_feature_count":
-                self.feature_count_before_processing,
+    def _transform_core(
+        self,
+        X: pd.DataFrame,
+        fit_scaler: bool = False
+    ):
 
-            "selected_feature_count":
-                self.feature_count_after_selection,
+        X = X.copy().reset_index(drop=True)
 
-            "final_feature_count":
-                self.feature_count_after_selection,
+        parts = []
 
-            "selected_features":
-                self.selected_features,
+        if self.numeric_cols:
 
-            "feature_selection_method":
-                (
-                    "L1-based feature selection"
-                    if self.task in [
-                        "classification",
-                        "regression"
-                    ]
-                    else "Not applicable"
+            X_num = pd.DataFrame(
+                self.numeric_imputer.transform(
+                    X[self.numeric_cols]
+                ),
+                columns=self.numeric_cols
+            )
+
+            X_num = self.log_transformer.transform(
+                X_num
+            )
+
+            parts.append(
+                X_num.reset_index(drop=True)
+            )
+
+        if self.categorical_cols:
+
+            X_cat = pd.DataFrame(
+                self.categorical_imputer.transform(
+                    X[self.categorical_cols]
+                ),
+                columns=self.categorical_cols
+            )
+
+            X_cat = self.rare_grouper.transform(
+                X_cat
+            )
+
+            encoded = self.encoder.transform(
+                X_cat
+            )
+
+            try:
+                names = (
+                    self.encoder
+                    .get_feature_names_out(
+                        self.categorical_cols
+                    )
                 )
-        }
+            except Exception:
+                names = [
+                    f"cat_{i}"
+                    for i in range(
+                        encoded.shape[1]
+                    )
+                ]
 
+            X_cat_encoded = pd.DataFrame(
+                encoded,
+                columns=names
+            )
 
-# ==========================================================
-# COMPATIBILITY CLASSES
-# ==========================================================
+            parts.append(
+                X_cat_encoded.reset_index(drop=True)
+            )
 
-class SupervisedPreprocessor(DataPreprocessor):
+        if parts:
 
-    def __init__(
-        self,
-        target_col=None,
-        **kwargs
-    ):
+            X_out = pd.concat(
+                parts,
+                axis=1
+            )
 
-        super().__init__(
-            target_col=target_col,
-            **kwargs
+        else:
+
+            X_out = pd.DataFrame(
+                index=X.index
+            )
+
+        if fit_scaler:
+
+            scaled = self.scaler.fit_transform(
+                X_out
+            )
+
+        else:
+
+            scaled = self.scaler.transform(
+                X_out
+            )
+
+        return pd.DataFrame(
+            scaled,
+            columns=X_out.columns
         )
 
-
-class UnsupervisedPreprocessor(DataPreprocessor):
-
-    def __init__(
+    def fit_transform(
         self,
-        test_size=0.20,
-        random_state=42,
-        **kwargs
+        X: pd.DataFrame
     ):
 
-        super().__init__(
-            target_col=None,
-            task="unsupervised",
-            **kwargs
+        X_no_ids, ids = self.split_ids(X)
+
+        self.fit(
+            X_no_ids
         )
 
-        self.test_size = test_size
-        self.random_state = random_state
+        processed = self._transform_core(
+            X_no_ids,
+            fit_scaler=True
+        )
 
-    def fit(self, X, y=None):
+        return processed, ids
 
-        return self.fit_unsupervised(X)
+    def transform(
+        self,
+        X: pd.DataFrame
+    ):
 
-    def transform(self, X):
+        if not self.fitted:
+            raise RuntimeError(
+                "Preprocessor must be fitted before transform()."
+            )
 
-        return self.transform_unsupervised(X)
+        X_no_ids = X.drop(
+            columns=self.id_cols,
+            errors="ignore"
+        ).copy()
 
-    def fit_transform(self, X, y=None):
+        ids = (
+            X[self.id_cols].copy()
+            if self.id_cols
+            else pd.DataFrame(
+                index=X.index
+            )
+        )
 
-        self.fit_unsupervised(X)
+        processed = self._transform_core(
+            X_no_ids,
+            fit_scaler=False
+        )
 
-        return self.transform_unsupervised(X)
+        return processed, ids
+
+    def get_info(self):
+
+        info = super().get_info()
+
+        info.update({
+            "numeric_log_transformed":
+                getattr(
+                    self,
+                    "log_transformer",
+                    None
+                ).log_columns_
+                if hasattr(
+                    getattr(
+                        self,
+                        "log_transformer",
+                        None
+                    ),
+                    "log_columns_"
+                )
+                else [],
+            "categorical_encoding":
+                "one_hot_encoding",
+            "feature_selection": False,
+            "feature_selection_removed": 0,
+            "final_feature_count":
+                len(self.output_columns),
+        })
+
+        return info
 
 
 # ==========================================================
-# SUPERVISED DATASET PROCESSOR
+# HIGH-LEVEL PROCESSING
 # ==========================================================
 
 def process_supervised_dataset(
-    df,
-    target_col,
-    test_size=0.20,
-    random_state=42
-):
+    df: pd.DataFrame,
+    target_col: str,
+    test_size: float = 0.20,
+    random_state: int = 42
+) -> Dict:
 
     if target_col not in df.columns:
-
         raise ValueError(
-            f"Target column '{target_col}' "
-            "not found in dataset."
+            f"Target column '{target_col}' not found."
         )
 
-    if not 0 < test_size < 1:
-
-        raise ValueError(
-            "test_size must be between 0 and 1."
-        )
+    from sklearn.model_selection import train_test_split
 
     X = df.drop(
         columns=[target_col]
-    )
+    ).copy()
 
-    y = df[target_col]
+    y = df[target_col].copy()
 
     X_train, X_test, y_train, y_test = (
         train_test_split(
@@ -1198,10 +1217,12 @@ def process_supervised_dataset(
     )
 
     processor = SupervisedPreprocessor(
-        target_col=target_col
+        target_col=target_col,
+        test_size=test_size,
+        random_state=random_state
     )
 
-    X_train_processed = (
+    X_train_processed, train_ids = (
         processor.fit_transform(
             X_train,
             y_train
@@ -1214,100 +1235,68 @@ def process_supervised_dataset(
         )
     )
 
-    train_ids = pd.DataFrame(
-        index=X_train.index
-    )
-
-    for col in processor.id_cols:
-
-        if col in X_train.columns:
-            train_ids[col] = X_train[col]
-
-    train_output = (
-        X_train_processed.reset_index(
-            drop=True
-        )
-    )
-
-    if not train_ids.empty:
-
-        train_output = pd.concat(
-            [
-                train_ids.reset_index(
-                    drop=True
-                ),
-                train_output
-            ],
-            axis=1
-        )
+    # Preserve target in the processed supervised outputs.
+    train_output = X_train_processed.copy()
+    test_output = X_test_processed.copy()
 
     train_output[target_col] = (
-        y_train.reset_index(
-            drop=True
-        )
+        y_train.reset_index(drop=True)
     )
 
-    test_output = (
-        X_test_processed.reset_index(
-            drop=True
-        )
+    # If test target exists in the supplied source, preserve it.
+    test_output[target_col] = (
+        y_test.reset_index(drop=True)
     )
 
-    if not test_ids.empty:
-
-        test_output = pd.concat(
+    # Preserve detected IDs.
+    if not train_ids.empty:
+        train_output = pd.concat(
             [
-                test_ids.reset_index(
-                    drop=True
-                ),
-                test_output
+                train_ids.reset_index(drop=True),
+                train_output.reset_index(drop=True)
             ],
             axis=1
         )
 
+    if not test_ids.empty:
+        test_output = pd.concat(
+            [
+                test_ids.reset_index(drop=True),
+                test_output.reset_index(drop=True)
+            ],
+            axis=1
+        )
+
+    info = processor.get_info()
+
+    info.update({
+        "dataset_type": "Entire Dataset",
+        "rows_processed": len(df),
+        "train_rows": len(train_output),
+        "test_rows": len(test_output),
+    })
+
     return {
-
-        "X_train":
-            train_output,
-
-        "X_test":
-            test_output,
-
-        "y_train":
-            y_train,
-
-        "y_test":
-            y_test,
-
-        "processor":
-            processor,
-
-        "info":
-            processor.get_info(),
-
-        "task":
-            processor.task
+        "X_train": train_output,
+        "X_test": test_output,
+        "y_train": y_train,
+        "y_test": y_test,
+        "processor": processor,
+        "task": processor.task,
+        "info": info,
     }
 
 
-# ==========================================================
-# UNSUPERVISED DATASET PROCESSOR
-# ==========================================================
-
 def process_unsupervised_dataset(
-    df,
-    test_size=0.20,
-    random_state=42
-):
+    df: pd.DataFrame,
+    test_size: float = 0.20,
+    random_state: int = 42
+) -> Dict:
 
-    if not 0 < test_size < 1:
+    from sklearn.model_selection import train_test_split
 
-        raise ValueError(
-            "test_size must be between 0 and 1."
-        )
-
-    X_train, X_test = train_test_split(
-        df.copy(),
+    train_df, test_df = train_test_split(
+        df,
         test_size=test_size,
         random_state=random_state
     )
@@ -1317,65 +1306,58 @@ def process_unsupervised_dataset(
         random_state=random_state
     )
 
-    X_train_processed, train_ids = (
+    X_train, train_ids = (
         processor.fit_transform(
-            X_train
+            train_df
         )
     )
 
-    X_test_processed, test_ids = (
+    X_test, test_ids = (
         processor.transform(
-            X_test
-        )
-    )
-
-    train_output = (
-        X_train_processed.reset_index(
-            drop=True
+            test_df
         )
     )
 
     if not train_ids.empty:
-
-        train_output = pd.concat(
+        X_train = pd.concat(
             [
-                train_ids.reset_index(
-                    drop=True
-                ),
-                train_output
+                train_ids.reset_index(drop=True),
+                X_train.reset_index(drop=True)
             ],
             axis=1
         )
-
-    test_output = (
-        X_test_processed.reset_index(
-            drop=True
-        )
-    )
 
     if not test_ids.empty:
-
-        test_output = pd.concat(
+        X_test = pd.concat(
             [
-                test_ids.reset_index(
-                    drop=True
-                ),
-                test_output
+                test_ids.reset_index(drop=True),
+                X_test.reset_index(drop=True)
             ],
             axis=1
         )
 
+    info = processor.get_info()
+
+    info.update({
+        "task": "unsupervised",
+        "dataset_type": "Entire Dataset",
+        "rows_processed": len(df),
+        "train_rows": len(X_train),
+        "test_rows": len(X_test),
+    })
+
     return {
-
-        "X_train":
-            train_output,
-
-        "X_test":
-            test_output,
-
-        "processor":
-            processor,
-
-        "info":
-            processor.get_info()
+        "X_train": X_train,
+        "X_test": X_test,
+        "processor": processor,
+        "task": "unsupervised",
+        "info": info,
     }
+
+
+# ==========================================================
+# BACKWARD-COMPATIBLE ALIASES
+# ==========================================================
+
+SupervisedPipeline = SupervisedPreprocessor
+UnsupervisedPipeline = UnsupervisedPreprocessor
