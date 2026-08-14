@@ -440,9 +440,9 @@ The EDA report may take longer than preprocessing because it runs multiple analy
 
 **Koustav Pattanayak**
 
-GitHub: `YOUR_GITHUB_PROFILE`
+GitHub: http://github.com/Koustav-2003
 
-LinkedIn: `YOUR_LINKEDIN_PROFILE`
+LinkedIn: www.linkedin.com/in/kpattanayak
 
 ## 📄 License
 
