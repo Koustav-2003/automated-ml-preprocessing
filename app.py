@@ -199,6 +199,8 @@ defaults = {
 
     "eda_report_bytes": None,
     "eda_generated": False,
+    "eda_source_signature": None,
+    "eda_report_filename": "EDA_report.html",
 
     # Locks
     "processing_running": False,
@@ -243,6 +245,8 @@ def clear_results(clear_uploads=False):
     st.session_state.pipeline_info_bytes = None
     st.session_state.eda_report_bytes = None
     st.session_state.eda_generated = False
+    st.session_state.eda_source_signature = None
+    st.session_state.eda_report_filename = "EDA_report.html"
     st.session_state.processed_target = None
     st.session_state.processed_dataset_type = None
     st.session_state.operation_error = None
@@ -271,7 +275,20 @@ def operation_is_running():
 
 
 def operation_lock():
-    return operation_is_running()
+    """Return True whenever EDA or preprocessing owns the UI."""
+    return bool(
+        st.session_state.get("processing_running", False)
+        or st.session_state.get("eda_running", False)
+    )
+
+
+def ui_is_locked():
+    """
+    Hard UI lock for every control except Cancel Operation.
+    This is deliberately separate from operation_lock() so every
+    widget uses the exact same state.
+    """
+    return operation_lock()
 
 
 def file_payload(uploaded_file):
@@ -468,6 +485,7 @@ def finish_background_operation():
     if kind == "eda":
         st.session_state.eda_report_bytes = content
         st.session_state.eda_generated = True
+        st.session_state.eda_source_signature = st.session_state.active_input_signature
         st.session_state.operation_message = (
             "EDA report generated successfully."
         )
@@ -512,70 +530,74 @@ def finish_background_operation():
 
 
 def render_operation_lock():
-    """Show status/cancel while the background operation is running."""
+    """Persistent operation banner with a real, visible cancel control."""
     if not operation_is_running():
         return
 
-    kind = st.session_state.operation_kind
+    kind = st.session_state.get("operation_kind")
     label = (
-        "EDA report generation is in progress..."
+        "📊 EDA report generation is in progress..."
         if kind == "eda"
-        else "Dataset preprocessing is in progress..."
+        else "⚙️ Dataset preprocessing is in progress..."
     )
 
-    st.warning(label)
-    st.caption(
-        "All other controls are temporarily disabled. "
-        "You can cancel the current operation below."
-    )
-
-    if st.button(
-        "✖ Cancel Operation",
-        use_container_width=True,
-        key="cancel_current_operation"
-    ):
-        cancel_current_operation()
-        st.rerun()
+    with st.container(border=True):
+        st.warning(label)
+        st.caption(
+            "All controls are locked while this operation is running. "
+            "You cannot change learning type, dataset workflow, files, "
+            "targets, EDA, or preprocessing until it finishes or is cancelled."
+        )
+        if st.button(
+            "✖ Cancel Operation",
+            type="primary",
+            use_container_width=True,
+            key="cancel_current_operation"
+        ):
+            cancel_current_operation()
+            st.rerun()
 
     if finish_background_operation():
         st.rerun()
 
-    time.sleep(0.7)
+    time.sleep(0.5)
     st.rerun()
 
 
 def generate_eda_report_download(files, data, key):
-    """Always render EDA control; completed/running states disable it."""
-    completed = st.session_state.eda_generated
-    disabled = operation_is_running() or completed or st.session_state.processed
+    """Render exactly one persistent EDA control for the current workflow."""
+    completed = bool(st.session_state.get("eda_generated", False))
+    running = bool(st.session_state.get("eda_running", False))
+    processed = bool(st.session_state.get("processed", False))
 
-    label = "📊 EDA Report Generated" if completed else "📊 Generate EDA Report"
+    if completed and st.session_state.get("eda_report_bytes") is not None:
+        st.success("EDA report generated successfully. The report is ready to download.")
+        st.button(
+            "📊 EDA Report Generated",
+            use_container_width=True,
+            disabled=True,
+            key=f"completed_{key}"
+        )
+        return
+
+    disabled = ui_is_locked() or processed
     if st.button(
-        label,
+        "📊 Generate EDA Report",
         use_container_width=True,
         key=key,
         disabled=disabled,
         help=(
-            "EDA has already been generated. Upload a new input or choose "
-            "a new workflow to generate another report."
-            if completed else
-            "Optional: EDA may take some time and does not affect preprocessing."
+            "Optional. EDA may take some time and does not affect preprocessing."
         )
     ):
+        if ui_is_locked():
+            st.warning("Another operation is already running. Please wait or cancel it.")
+            st.stop()
+
         launch_http_operation(
             "eda", EDA_API_URL, files, data, metadata={"eda_key": key}
         )
         st.rerun()
-
-    if completed and st.session_state.eda_report_bytes is not None:
-        st.download_button(
-            "⬇️ Download EDA Report (HTML)",
-            data=st.session_state.eda_report_bytes,
-            file_name="EDA_report.html",
-            mime="text/html",
-            use_container_width=True,
-            key=f"download_{key}"
-        )
 
 
 render_operation_lock()
@@ -640,7 +662,7 @@ ml_task = st.radio(
     ],
     horizontal=True,
     key="learning_type",
-    disabled=operation_lock()
+    disabled=ui_is_locked()
 )
 
 
@@ -683,7 +705,7 @@ if ml_task == "Supervised Learning":
         ],
         horizontal=True,
         key="supervised_dataset_type",
-        disabled=operation_lock()
+        disabled=ui_is_locked()
     )
 
     if (
@@ -724,14 +746,14 @@ if ml_task == "Supervised Learning":
                 "for testing. Default is 20%."
             ),
             key="supervised_test_size_percent",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
         uploaded_file = st.file_uploader(
             "📁 Upload your complete dataset",
             type=["csv"],
             key="entire_dataset_upload",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
         train_file = None
@@ -753,7 +775,7 @@ if ml_task == "Supervised Learning":
             "📁 Upload your training dataset",
             type=["csv"],
             key="training_dataset_upload",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
         train_file = None
@@ -778,14 +800,14 @@ if ml_task == "Supervised Learning":
             "📁 Upload your training dataset",
             type=["csv"],
             key="test_mode_train_upload",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
         test_file = st.file_uploader(
             "📁 Upload your test dataset",
             type=["csv"],
             key="test_mode_test_upload",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
     # ======================================================
@@ -903,7 +925,7 @@ if ml_task == "Supervised Learning":
             options=df.columns,
             index=len(df.columns) - 1,
             key="single_dataset_target",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
         sync_input_signature(
@@ -969,7 +991,7 @@ if ml_task == "Supervised Learning":
         )
 
         processing_disabled = (
-            operation_is_running()
+            ui_is_locked()
             or st.session_state.eda_generated
             or st.session_state.processed
         )
@@ -981,6 +1003,10 @@ if ml_task == "Supervised Learning":
             disabled=processing_disabled
         ):
             uploaded_file.seek(0)
+            if ui_is_locked():
+                st.warning("Another operation is already running. Please wait or cancel it.")
+                st.stop()
+
             launch_http_operation(
                 "process",
                 API_URL,
@@ -1102,7 +1128,7 @@ if ml_task == "Supervised Learning":
                 "training dataset."
             ),
             key="test_dataset_target",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
         sync_input_signature(
@@ -1161,7 +1187,7 @@ if ml_task == "Supervised Learning":
         )
 
         process_disabled = (
-            operation_is_running()
+            ui_is_locked()
             or st.session_state.eda_generated
             or st.session_state.processed
         )
@@ -1174,6 +1200,10 @@ if ml_task == "Supervised Learning":
         ):
             train_file.seek(0)
             test_file.seek(0)
+            if ui_is_locked():
+                st.warning("Another operation is already running. Please wait or cancel it.")
+                st.stop()
+
             launch_http_operation(
                 "process",
                 API_URL,
@@ -1225,7 +1255,7 @@ else:
         ],
         horizontal=True,
         key="unsupervised_dataset_type",
-        disabled=operation_lock()
+        disabled=ui_is_locked()
     )
 
 
@@ -1292,14 +1322,14 @@ else:
                 "for testing. Default is 20%."
             ),
             key="unsupervised_test_size_percent",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
         unsupervised_file = st.file_uploader(
             "📁 Upload your complete dataset",
             type=["csv"],
             key="unsupervised_entire_dataset_upload",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
 
@@ -1322,7 +1352,7 @@ else:
             "📁 Upload your training dataset",
             type=["csv"],
             key="unsupervised_training_dataset_upload",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
 
@@ -1343,14 +1373,14 @@ else:
             "📁 Upload your training dataset",
             type=["csv"],
             key="unsupervised_test_workflow_train_upload",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
         unsupervised_test_file = st.file_uploader(
             "📁 Upload your test dataset",
             type=["csv"],
             key="unsupervised_test_workflow_test_upload",
-            disabled=operation_lock()
+            disabled=ui_is_locked()
         )
 
         # Use the training dataset as the dataset displayed in
@@ -1572,7 +1602,7 @@ else:
         )
 
         processing_disabled = (
-            operation_is_running()
+            ui_is_locked()
             or st.session_state.eda_generated
             or st.session_state.processed
         )
@@ -1595,6 +1625,10 @@ else:
                 request_files = {
                     "file": file_payload(unsupervised_file)
                 }
+
+            if ui_is_locked():
+                st.warning("Another operation is already running. Please wait or cancel it.")
+                st.stop()
 
             launch_http_operation(
                 "process",
@@ -1658,6 +1692,7 @@ if (
                 file_name="X_train.csv",
                 mime="text/csv",
                 use_container_width=True,
+            disabled=ui_is_locked(),
                 key="download_unsupervised_x_train"
             )
 
@@ -1672,6 +1707,7 @@ if (
                 file_name="X_test.csv",
                 mime="text/csv",
                 use_container_width=True,
+            disabled=ui_is_locked(),
                 key="download_unsupervised_x_test"
             )
 
@@ -1686,6 +1722,7 @@ if (
                 file_name="pipeline_info.txt",
                 mime="text/plain",
                 use_container_width=True,
+            disabled=ui_is_locked(),
                 key="download_unsupervised_pipeline_info"
             )
 
@@ -1695,6 +1732,7 @@ if (
             file_name="processed_unsupervised_dataset.zip",
             mime="application/zip",
             use_container_width=True,
+            disabled=ui_is_locked(),
             key="download_unsupervised_zip"
         )
 
@@ -1715,6 +1753,7 @@ if (
                 file_name="X_train.csv",
                 mime="text/csv",
                 use_container_width=True,
+            disabled=ui_is_locked(),
                 key="download_x_train"
             )
 
@@ -1729,6 +1768,7 @@ if (
                 file_name="X_test.csv",
                 mime="text/csv",
                 use_container_width=True,
+            disabled=ui_is_locked(),
                 key="download_x_test"
             )
 
@@ -1743,6 +1783,7 @@ if (
                 file_name="pipeline_info.txt",
                 mime="text/plain",
                 use_container_width=True,
+            disabled=ui_is_locked(),
                 key="download_supervised_pipeline_info"
             )
 
@@ -1752,6 +1793,7 @@ if (
             file_name="processed_dataset.zip",
             mime="application/zip",
             use_container_width=True,
+            disabled=ui_is_locked(),
             key="download_supervised_zip"
         )
 
@@ -2170,6 +2212,35 @@ if st.session_state.processed:
                     f"Could not display processed output: {str(e)}"
                 )
 
+
+
+
+# ==========================================================
+# PERSISTENT EDA DOWNLOAD
+# ==========================================================
+# Keep the report visible even if Streamlit reruns into a different
+# conditional workflow block after the background operation finishes.
+if (
+    st.session_state.get("eda_generated", False)
+    and st.session_state.get("eda_report_bytes") is not None
+):
+    st.divider()
+    with st.container(border=True):
+        st.subheader("📊 EDA Report")
+        st.caption(
+            "EDA is optional and does not affect preprocessing. "
+            "The generated HTML report remains available until you upload "
+            "a new input or choose a different workflow."
+        )
+        st.download_button(
+            "⬇️ Download EDA Report (HTML)",
+            data=st.session_state.eda_report_bytes,
+            file_name=st.session_state.get("eda_report_filename", "EDA_report.html"),
+            mime="text/html",
+            use_container_width=True,
+            disabled=ui_is_locked(),
+            key="persistent_eda_download"
+        )
 
 # ==========================================================
 # FOOTER
