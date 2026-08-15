@@ -759,14 +759,57 @@ def create_eda_report(
         for feature in features_with_nan:
             if supervised:
                 data = df[[feature, target_column]].copy()
-                data[feature] = np.where(data[feature].isnull(), 1, 0)
-                grouped = data.groupby(feature)[target_column].median()
+                data["_missing_flag"] = np.where(
+                    data[feature].isnull(), 1, 0
+                )
 
-                fig, ax = plt.subplots(figsize=(6, 3.5))
-                grouped.plot.bar(ax=ax)
-                ax.set_xlabel("Missing flag (0 = present, 1 = missing)")
-                ax.set_ylabel(f"Median {target_column}")
-                ax.set_title(feature)
+                target_series = data[target_column]
+
+                if pd.api.types.is_numeric_dtype(target_series):
+                    grouped = (
+                        data.groupby("_missing_flag")[target_column]
+                        .median()
+                    )
+
+                    fig, ax = plt.subplots(figsize=(6, 3.5))
+                    grouped.plot.bar(ax=ax)
+                    ax.set_xlabel(
+                        "Missing flag (0 = present, 1 = missing)"
+                    )
+                    ax.set_ylabel(f"Median {target_column}")
+                    ax.set_title(feature)
+
+                else:
+                    # Categorical/multiclass targets cannot use median.
+                    # Show the target-class distribution for rows where
+                    # the feature is present vs missing.
+                    grouped = pd.crosstab(
+                        data["_missing_flag"],
+                        data[target_column].fillna("Missing")
+                        .astype(str),
+                        normalize="index"
+                    ) * 100
+
+                    fig, ax = plt.subplots(
+                        figsize=(8, 4.5)
+                    )
+                    grouped.plot(
+                        kind="bar",
+                        stacked=True,
+                        ax=ax
+                    )
+                    ax.set_xlabel(
+                        "Missing flag (0 = present, 1 = missing)"
+                    )
+                    ax.set_ylabel("Target class percentage")
+                    ax.set_title(
+                        f"{feature} missingness vs {target_column}"
+                    )
+                    ax.legend(
+                        title=target_column,
+                        bbox_to_anchor=(1.02, 1),
+                        loc="upper left"
+                    )
             else:
                 flags = np.where(df[feature].isnull(), 1, 0)
                 counts = pd.Series(flags).value_counts().sort_index()
@@ -826,20 +869,72 @@ def create_eda_report(
             and "YrSold" in df.columns
         ):
             pair = df[[feature, "YrSold", target_column]].dropna().copy()
+
             if not pair.empty:
-                pair[feature] = pair["YrSold"] - pair[feature]
-                fig, ax = plt.subplots(figsize=(8, 4))
-                ax.scatter(
-                    pair[feature], pair[target_column],
-                    s=12, alpha=0.55
+
+                pair[feature] = (
+                    pair["YrSold"] - pair[feature]
                 )
-                ax.set_xlabel(feature)
-                ax.set_ylabel(target_column)
-                ax.set_title(f"{feature} vs {target_column}")
-                temporal += _image_html(
-                    _fig_to_base64(fig),
-                    f"{feature} versus target"
-                )
+
+                target_series = pair[target_column]
+
+                if pd.api.types.is_numeric_dtype(target_series):
+
+                    fig, ax = plt.subplots(figsize=(8, 4))
+                    ax.scatter(
+                        pair[feature],
+                        pair[target_column],
+                        s=12,
+                        alpha=0.55
+                    )
+                    ax.set_xlabel(feature)
+                    ax.set_ylabel(target_column)
+                    ax.set_title(
+                        f"{feature} vs {target_column}"
+                    )
+                    temporal += _image_html(
+                        _fig_to_base64(fig),
+                        f"{feature} versus target"
+                    )
+
+                else:
+                    grouped = pd.crosstab(
+                        pair[feature],
+                        pair[target_column]
+                        .fillna("Missing")
+                        .astype(str),
+                        normalize="index"
+                    ) * 100
+
+                    fig, ax = plt.subplots(
+                        figsize=(9, 4.5)
+                    )
+                    grouped.plot(
+                        kind="bar",
+                        stacked=True,
+                        ax=ax
+                    )
+                    ax.set_xlabel(feature)
+                    ax.set_ylabel(
+                        "Target class percentage"
+                    )
+                    ax.set_title(
+                        f"{feature} vs {target_column}"
+                    )
+                    ax.legend(
+                        title=target_column,
+                        bbox_to_anchor=(1.02, 1),
+                        loc="upper left"
+                    )
+                    plt.xticks(
+                        rotation=45,
+                        ha="right"
+                    )
+
+                    temporal += _image_html(
+                        _fig_to_base64(fig),
+                        f"{feature} versus categorical target"
+                    )
 
     sections.append(temporal + "</section>")
     section_no += 1
@@ -851,20 +946,56 @@ def create_eda_report(
     )
     for feature in discrete_feature:
         if supervised:
-            series = (
-                df.groupby(feature)[target_column]
-                .median()
-                .sort_index()
-            )
-            ylabel = f"Median {target_column}"
-            title = feature
+            target_series = df[target_column]
+
+            if pd.api.types.is_numeric_dtype(target_series):
+                series = (
+                    df.groupby(feature)[target_column]
+                    .median()
+                    .sort_index()
+                )
+                ylabel = f"Median {target_column}"
+                title = feature
+
+            else:
+                # For categorical targets, display the dominant class
+                # distribution by the discrete numerical feature.
+                temp = df[[feature, target_column]].copy()
+                temp[target_column] = (
+                    temp[target_column]
+                    .fillna("Missing")
+                    .astype(str)
+                )
+
+                counts = pd.crosstab(
+                    temp[feature],
+                    temp[target_column],
+                    normalize="index"
+                ) * 100
+
+                series = counts.head(25)
+                ylabel = "Target class percentage"
+                title = f"{feature} vs {target_column}"
         else:
             series = df[feature].value_counts().sort_index()
             ylabel = "Number of rows"
             title = feature
 
         fig, ax = plt.subplots(figsize=(8, 4))
-        series.plot.bar(ax=ax)
+        if isinstance(series, pd.DataFrame):
+            series.plot(
+                kind="bar",
+                stacked=True,
+                ax=ax
+            )
+            ax.legend(
+                title=target_column,
+                bbox_to_anchor=(1.02, 1),
+                loc="upper left"
+            )
+        else:
+            series.plot.bar(ax=ax)
+
         ax.set_xlabel(feature)
         ax.set_ylabel(ylabel)
         ax.set_title(title)
@@ -975,23 +1106,57 @@ def create_eda_report(
 
         if supervised:
             temp = df.assign(
-                _cat=df[feature].fillna("Missing").astype(str)
+                _cat=df[feature]
+                .fillna("Missing")
+                .astype(str)
             )
-            series = (
-                temp.groupby("_cat")[target_column]
-                .median()
-                .sort_values(ascending=False)
-                .head(30)
-            )
-            ylabel = f"Median {target_column}"
-            title = f"{feature} vs {target_column}"
+
+            target_series = temp[target_column]
+
+            if pd.api.types.is_numeric_dtype(target_series):
+
+                series = (
+                    temp.groupby("_cat")[target_column]
+                    .median()
+                    .sort_values(ascending=False)
+                    .head(30)
+                )
+                ylabel = f"Median {target_column}"
+                title = f"{feature} vs {target_column}"
+
+            else:
+                # Categorical feature + categorical target:
+                # show target-class proportions within each category.
+                series = pd.crosstab(
+                    temp["_cat"],
+                    target_series.fillna("Missing")
+                    .astype(str),
+                    normalize="index"
+                ).head(30) * 100
+
+                ylabel = "Target class percentage"
+                title = f"{feature} vs {target_column}"
         else:
             series = counts.head(30)
             ylabel = "Number of rows"
             title = f"{feature} - distribution"
 
         fig, ax = plt.subplots(figsize=(10, 5))
-        series.plot.bar(ax=ax)
+
+        if isinstance(series, pd.DataFrame):
+            series.plot(
+                kind="bar",
+                stacked=True,
+                ax=ax
+            )
+            ax.legend(
+                title=target_column,
+                bbox_to_anchor=(1.02, 1),
+                loc="upper left"
+            )
+        else:
+            series.plot.bar(ax=ax)
+
         ax.set_xlabel(feature)
         ax.set_ylabel(ylabel)
         ax.set_title(title)
