@@ -1475,8 +1475,12 @@ def process_supervised_dataset(df, target_col, test_size=0.20, random_state=42):
     if not test_ids.empty:
         test_output = pd.concat([test_ids.reset_index(drop=True), test_output.reset_index(drop=True)], axis=1)
 
-    train_output[target_col] = y_train.reset_index(drop=True)
-    test_output[target_col] = y_test.reset_index(drop=True)
+    # Assign target values positionally.
+    # Using a reset-index Series here would make pandas align by the
+    # original train/test row indices, producing NaN/None for rows whose
+    # indices do not match 0..n-1.
+    train_output[target_col] = y_train.to_numpy()
+    test_output[target_col] = y_test.to_numpy()
 
     info = processor.get_info()
     info.update({"task": processor.task, "target": target_col, "dataset_type": "Entire Dataset", "rows_processed": len(df), "feature_selection_method": "None"})
