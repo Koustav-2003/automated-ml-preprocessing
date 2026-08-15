@@ -2020,8 +2020,12 @@ async def process_dataset(
             X_train_processed.copy()
         )
 
+        # Encode categorical classification targets using the
+        # training-fitted LabelEncoder.
         train_output[target] = (
-            y_train.values
+            processor.encode_target(
+                y_train
+            )
         )
 
         train_output = add_ids(
@@ -2181,7 +2185,13 @@ async def process_dataset(
 
         # The target is retained in X_train because this is the
         # labelled training dataset.
-        train_output[target] = y_train.to_numpy()
+        # Encode categorical classification targets using the
+        # training-fitted LabelEncoder.
+        train_output[target] = (
+            processor.encode_target(
+                y_train
+            )
+        )
 
         train_ids = pd.DataFrame(
             index=X_train.index
@@ -2256,7 +2266,12 @@ async def process_dataset(
         # --------------------------------------------------
 
         if y_test is not None:
-            X_test_processed[target] = y_test.to_numpy()
+            # Use the same LabelEncoder fitted on the training target.
+            X_test_processed[target] = (
+                processor.encode_target(
+                    y_test
+                )
+            )
 
         # --------------------------------------------------
         # Report

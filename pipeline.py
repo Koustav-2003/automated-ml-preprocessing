@@ -3,7 +3,7 @@ import numpy as np
 
 from scipy import stats
 
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 
 
 class DataPreprocessor:
@@ -67,6 +67,11 @@ class DataPreprocessor:
         self.target_classes = []
         self.target_class_mapping = {}
         self.global_target_priors = {}
+
+        # Label encoder for categorical classification targets.
+        # Fitted on training labels only.
+        self.target_encoder = None
+        self.target_was_label_encoded = False
 
         # Feature selection is intentionally disabled.
         self.selected_features = []
@@ -332,6 +337,83 @@ class DataPreprocessor:
                 )
 
         return X
+
+    # ======================================================
+    # TARGET LABEL ENCODING
+    # ======================================================
+
+    def _fit_target_encoder(self, y):
+
+        self.target_encoder = None
+        self.target_was_label_encoded = False
+
+        is_categorical_target = (
+            pd.api.types.is_object_dtype(y)
+            or pd.api.types.is_string_dtype(y)
+            or pd.api.types.is_categorical_dtype(y)
+            or pd.api.types.is_bool_dtype(y)
+        )
+
+        if (
+            self.task == "classification"
+            and is_categorical_target
+        ):
+
+            y_series = pd.Series(
+                y
+            ).reset_index(drop=True)
+
+            if y_series.isna().any():
+                raise ValueError(
+                    "Target column contains missing values. "
+                    "Categorical classification targets must be "
+                    "complete before label encoding."
+                )
+
+            self.target_encoder = LabelEncoder()
+            self.target_encoder.fit(
+                y_series.astype(str)
+            )
+
+            self.target_classes = (
+                self.target_encoder.classes_.tolist()
+            )
+
+            self.target_class_mapping = {
+                class_value: index
+                for index, class_value
+                in enumerate(self.target_classes)
+            }
+
+            self.target_was_label_encoded = True
+
+    def encode_target(self, y):
+        """Return the target in the representation used by the model."""
+
+        y_series = pd.Series(
+            y
+        ).reset_index(drop=True)
+
+        if self.target_encoder is None:
+            return y_series.to_numpy()
+
+        try:
+            return self.target_encoder.transform(
+                y_series.astype(str).to_numpy()
+            )
+
+        except ValueError as exc:
+            raise ValueError(
+                "The target contains a class that was not present "
+                "in the training target."
+            ) from exc
+
+    def get_target_classes(self):
+
+        if self.target_encoder is None:
+            return []
+
+        return self.target_encoder.classes_.tolist()
 
     # ======================================================
     # SUPERVISED TARGET ENCODING
@@ -1036,6 +1118,10 @@ class DataPreprocessor:
             y_train
         )
 
+        self._fit_target_encoder(
+            y_train
+        )
+
         self._detect_ids(X_train)
 
         X = X_train.drop(
@@ -1421,7 +1507,17 @@ class DataPreprocessor:
                 self.feature_columns.copy(),
 
             "feature_selection_method":
-                "None"
+                "None",
+
+            "target_label_encoding":
+                (
+                    "LabelEncoder"
+                    if self.target_was_label_encoded
+                    else "None"
+                ),
+
+            "target_classes":
+                self.get_target_classes()
         }
 
 # ==========================================================
@@ -1475,12 +1571,18 @@ def process_supervised_dataset(df, target_col, test_size=0.20, random_state=42):
     if not test_ids.empty:
         test_output = pd.concat([test_ids.reset_index(drop=True), test_output.reset_index(drop=True)], axis=1)
 
-    # Assign target values positionally.
-    # Using a reset-index Series here would make pandas align by the
-    # original train/test row indices, producing NaN/None for rows whose
-    # indices do not match 0..n-1.
-    train_output[target_col] = y_train.to_numpy()
-    test_output[target_col] = y_test.to_numpy()
+    # Encode categorical classification targets using the encoder
+    # fitted on the training labels only.
+    y_train_processed = processor.encode_target(
+        y_train
+    )
+    y_test_processed = processor.encode_target(
+        y_test
+    )
+
+    # Assign by position to avoid pandas index alignment.
+    train_output[target_col] = y_train_processed
+    test_output[target_col] = y_test_processed
 
     info = processor.get_info()
     info.update({"task": processor.task, "target": target_col, "dataset_type": "Entire Dataset", "rows_processed": len(df), "feature_selection_method": "None"})
