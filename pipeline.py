@@ -63,6 +63,11 @@ class DataPreprocessor:
         self.label_mappings = {}
         self.global_target_mean = None
 
+        # Target encoding state for classification.
+        self.target_classes = []
+        self.target_class_mapping = {}
+        self.global_target_priors = {}
+
         # Feature selection is intentionally disabled.
         self.selected_features = []
 
@@ -104,7 +109,9 @@ class DataPreprocessor:
 
         if pd.api.types.is_numeric_dtype(y):
 
-            if y.nunique() <= 20:
+            # Numeric target with fewer than 10 unique values
+            # is treated as classification; otherwise regression.
+            if y.nunique() < 10:
                 return "classification"
 
             return "regression"
@@ -336,26 +343,162 @@ class DataPreprocessor:
             self._get_categorical_features(X)
         )
 
-        self.global_target_mean = y.mean()
+        y_series = pd.Series(
+            y
+        ).reset_index(drop=True)
+
+        # Detect the target type before computing any target mean.
+        self.task = self._detect_task(
+            y_series
+        )
 
         self.label_mappings = {}
+        self.global_target_mean = None
+        self.target_classes = []
+        self.target_class_mapping = {}
+        self.global_target_priors = {}
 
-        for feature in categorical_features:
+        # --------------------------------------------------
+        # REGRESSION
+        # --------------------------------------------------
 
-            temp = pd.DataFrame({
-                "category": X[feature].values,
-                "target": y.values
-            })
+        if self.task == "regression":
 
-            grouped = (
-                temp
-                .groupby("category")["target"]
-                .agg(["sum", "count"])
+            numeric_target = pd.to_numeric(
+                y_series,
+                errors="coerce"
             )
 
-            self.label_mappings[feature] = (
-                grouped.to_dict("index")
+            if numeric_target.isna().all():
+
+                raise ValueError(
+                    "Regression target must contain numeric values."
+                )
+
+            self.global_target_mean = (
+                numeric_target.mean()
             )
+
+            target_for_encoding = (
+                numeric_target.fillna(
+                    self.global_target_mean
+                )
+            )
+
+            for feature in categorical_features:
+
+                temp = pd.DataFrame({
+                    "category":
+                        X[feature].reset_index(drop=True),
+
+                    "target":
+                        target_for_encoding
+                })
+
+                grouped = (
+                    temp
+                    .groupby("category")["target"]
+                    .agg(["sum", "count"])
+                )
+
+                self.label_mappings[feature] = (
+                    grouped.to_dict("index")
+                )
+
+        # --------------------------------------------------
+        # BINARY / MULTICLASS CLASSIFICATION
+        # --------------------------------------------------
+
+        else:
+
+            classes = (
+                y_series
+                .dropna()
+                .unique()
+                .tolist()
+            )
+
+            if not classes:
+
+                raise ValueError(
+                    "Classification target contains no valid classes."
+                )
+
+            self.target_classes = classes
+
+            self.target_class_mapping = {
+                class_value: class_index
+                for class_index, class_value
+                in enumerate(classes)
+            }
+
+            encoded_target = (
+                y_series
+                .map(self.target_class_mapping)
+                .astype(float)
+            )
+
+            # Global prior probability for every class.
+            self.global_target_priors = {
+                class_index: float(
+                    (encoded_target == class_index).mean()
+                )
+                for class_index
+                in range(len(classes))
+            }
+
+            # Kept for backwards-compatible reporting/fallback logic.
+            self.global_target_mean = (
+                encoded_target.mean()
+            )
+
+            for feature in categorical_features:
+
+                temp = pd.DataFrame({
+                    "category":
+                        X[feature].reset_index(drop=True),
+
+                    "target":
+                        encoded_target
+                })
+
+                counts = pd.crosstab(
+                    temp["category"],
+                    temp["target"]
+                )
+
+                for class_index in range(
+                    len(classes)
+                ):
+
+                    if class_index not in counts.columns:
+                        counts[class_index] = 0
+
+                counts = counts.sort_index(
+                    axis=1
+                )
+
+                self.label_mappings[feature] = {
+                    "counts":
+                        counts.to_dict("index"),
+
+                    "totals":
+                        temp["category"]
+                        .value_counts()
+                        .to_dict()
+                }
+
+    def _target_encoded_column_names(
+        self,
+        feature
+    ):
+
+        return [
+            f"{feature}__te_class_{class_index}"
+            for class_index in range(
+                len(self.target_classes)
+            )
+        ]
 
     def _apply_target_encoding_train(
         self,
@@ -365,22 +508,230 @@ class DataPreprocessor:
 
         X = X.copy()
 
-        y_array = np.asarray(y)
+        y_series = pd.Series(
+            y
+        ).reset_index(drop=True)
+
+        # --------------------------------------------------
+        # REGRESSION
+        # --------------------------------------------------
+
+        if self.task == "regression":
+
+            y_array = pd.to_numeric(
+                y_series,
+                errors="coerce"
+            ).to_numpy(dtype=float)
+
+            y_array = np.where(
+                np.isnan(y_array),
+                self.global_target_mean,
+                y_array
+            )
+
+            for feature in self.categorical_features:
+
+                if feature not in X.columns:
+                    continue
+
+                mapping = self.label_mappings.get(
+                    feature,
+                    {}
+                )
+
+                encoded_values = []
+
+                for row_index, category in enumerate(
+                    X[feature].values
+                ):
+
+                    if category in mapping:
+
+                        category_sum = mapping[
+                            category
+                        ]["sum"]
+
+                        category_count = mapping[
+                            category
+                        ]["count"]
+
+                        other_sum = (
+                            category_sum
+                            -
+                            y_array[row_index]
+                        )
+
+                        other_count = (
+                            category_count - 1
+                        )
+
+                        if other_count > 0:
+
+                            value = (
+                                other_sum
+                                /
+                                other_count
+                            )
+
+                        else:
+
+                            value = (
+                                self.global_target_mean
+                            )
+
+                    else:
+
+                        value = (
+                            self.global_target_mean
+                        )
+
+                    encoded_values.append(
+                        value
+                    )
+
+                X[feature] = encoded_values
+
+            return X
+
+        # --------------------------------------------------
+        # CLASSIFICATION
+        # Encode each categorical feature as one column
+        # per target class, containing class probability.
+        # For training rows, use leave-one-out probabilities.
+        # --------------------------------------------------
 
         for feature in self.categorical_features:
 
             if feature not in X.columns:
                 continue
 
-            mapping = self.label_mappings[feature]
+            mapping = self.label_mappings.get(
+                feature,
+                {}
+            )
 
-            encoded_values = []
+            counts_map = mapping.get(
+                "counts",
+                {}
+            )
 
-            for i, category in enumerate(
-                X[feature].values
+            totals_map = mapping.get(
+                "totals",
+                {}
+            )
+
+            encoded_column_names = (
+                self._target_encoded_column_names(
+                    feature
+                )
+            )
+
+            for class_index, column_name in enumerate(
+                encoded_column_names
             ):
 
-                if category in mapping:
+                encoded_values = []
+
+                for row_index, category in enumerate(
+                    X[feature].values
+                ):
+
+                    class_counts = (
+                        counts_map.get(
+                            category,
+                            {}
+                        )
+                    )
+
+                    category_total = (
+                        totals_map.get(
+                            category,
+                            0
+                        )
+                    )
+
+                    own_class = (
+                        self.target_class_mapping.get(
+                            y_series.iloc[row_index]
+                        )
+                    )
+
+                    own_class_count = (
+                        1
+                        if own_class == class_index
+                        else 0
+                    )
+
+                    other_count = (
+                        category_total - 1
+                    )
+
+                    if other_count > 0:
+
+                        numerator = (
+                            class_counts.get(
+                                class_index,
+                                0
+                            )
+                            -
+                            own_class_count
+                        )
+
+                        value = (
+                            numerator
+                            /
+                            other_count
+                        )
+
+                    else:
+
+                        value = (
+                            self.global_target_priors[
+                                class_index
+                            ]
+                        )
+
+                    encoded_values.append(
+                        value
+                    )
+
+                X[column_name] = encoded_values
+
+            X = X.drop(
+                columns=[feature]
+            )
+
+        return X
+
+    def _apply_target_encoding(self, X):
+
+        X = X.copy()
+
+        # --------------------------------------------------
+        # REGRESSION
+        # --------------------------------------------------
+
+        if self.task == "regression":
+
+            for feature in self.categorical_features:
+
+                if feature not in X.columns:
+                    continue
+
+                mapping = self.label_mappings.get(
+                    feature,
+                    {}
+                )
+
+                def encode_value(
+                    category
+                ):
+
+                    if category not in mapping:
+
+                        return (
+                            self.global_target_mean
+                        )
 
                     category_sum = mapping[
                         category
@@ -390,67 +741,106 @@ class DataPreprocessor:
                         category
                     ]["count"]
 
-                    other_sum = (
-                        category_sum - y_array[i]
+                    return (
+                        category_sum
+                        /
+                        category_count
                     )
 
-                    other_count = (
-                        category_count - 1
+                X[feature] = (
+                    X[feature]
+                    .map(encode_value)
+                    .fillna(
+                        self.global_target_mean
                     )
+                )
 
-                    if other_count > 0:
+            return X
 
-                        value = (
-                            other_sum / other_count
-                        )
-
-                    else:
-
-                        value = self.global_target_mean
-
-                else:
-
-                    value = self.global_target_mean
-
-                encoded_values.append(value)
-
-            X[feature] = encoded_values
-
-        return X
-
-    def _apply_target_encoding(self, X):
-
-        X = X.copy()
+        # --------------------------------------------------
+        # CLASSIFICATION
+        # --------------------------------------------------
 
         for feature in self.categorical_features:
 
             if feature not in X.columns:
                 continue
 
-            mapping = self.label_mappings[feature]
+            mapping = self.label_mappings.get(
+                feature,
+                {}
+            )
 
-            def encode_value(category):
+            counts_map = mapping.get(
+                "counts",
+                {}
+            )
 
-                if category not in mapping:
-                    return self.global_target_mean
+            totals_map = mapping.get(
+                "totals",
+                {}
+            )
 
-                category_sum = mapping[
-                    category
-                ]["sum"]
+            for class_index, column_name in enumerate(
+                self._target_encoded_column_names(
+                    feature
+                )
+            ):
 
-                category_count = mapping[
-                    category
-                ]["count"]
+                def encode_class_probability(
+                    category,
+                    class_index=class_index
+                ):
 
-                return category_sum / category_count
+                    class_counts = (
+                        counts_map.get(
+                            category,
+                            {}
+                        )
+                    )
 
-            X[feature] = (
-                X[feature]
-                .map(encode_value)
-                .fillna(self.global_target_mean)
+                    category_total = (
+                        totals_map.get(
+                            category,
+                            0
+                        )
+                    )
+
+                    if category_total <= 0:
+
+                        return (
+                            self.global_target_priors[
+                                class_index
+                            ]
+                        )
+
+                    return (
+                        class_counts.get(
+                            class_index,
+                            0
+                        )
+                        /
+                        category_total
+                    )
+
+                X[column_name] = (
+                    X[feature]
+                    .map(
+                        encode_class_probability
+                    )
+                    .fillna(
+                        self.global_target_priors[
+                            class_index
+                        ]
+                    )
+                )
+
+            X = X.drop(
+                columns=[feature]
             )
 
         return X
+
 
     # ======================================================
     # UNSUPERVISED ONE-HOT ENCODING
@@ -636,6 +1026,15 @@ class DataPreprocessor:
             )
 
         X_train = X_train.copy()
+
+        y_train = pd.Series(
+            y_train,
+            index=X_train.index
+        )
+
+        self.task = self._detect_task(
+            y_train
+        )
 
         self._detect_ids(X_train)
 
