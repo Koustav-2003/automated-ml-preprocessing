@@ -765,7 +765,9 @@ class DataPreprocessor:
         X = self._apply_supervised_feature_drops(X)
 
         # IMPORTANT:
-        # Categorical features are encoded without using y.
+        # Categorical FEATURES are encoded independently of the target.
+        # This keeps Churn as a separate single target column and prevents
+        # target leakage.
         self._fit_one_hot_encoding(X)
         X = self._apply_one_hot_encoding(X)
 
