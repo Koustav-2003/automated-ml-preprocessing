@@ -722,6 +722,11 @@ class DataPreprocessor:
                     "Regression target contains missing/non-numeric values."
                 )
 
+        # Fit the classification target encoder on TRAIN ONLY.
+        # This makes categorical targets such as Yes/No become 0/1
+        # in the processed output while leaving regression targets numeric.
+        self._fit_target_encoder(y_train)
+
         self.feature_count_before_processing = X_train.shape[1]
 
         # IDs are detected and removed BEFORE any feature processing.

@@ -1031,11 +1031,11 @@ def create_eda_report(
     section_no += 1
 
     note = (
-        "The supervised notebook checks log transformation of continuous "
-        "features when zero is absent and also logs SalePrice in its "
-        "transformation cell. The unsupervised notebook performs the same "
-        "continuous-feature inspection without a target."
-    )
+    "The supervised pipeline checks continuous numerical features for "
+    "skewness and applies log transformation when appropriate. The "
+    "unsupervised pipeline performs the same continuous-feature inspection "
+    "without using a target variable."
+    ) 
     sections.append(
         f"<section><h2>{section_no}. Transformation Note</h2>"
         f"<p>{html.escape(note)}</p></section>"
