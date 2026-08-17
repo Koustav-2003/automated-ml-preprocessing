@@ -1102,6 +1102,17 @@ if ml_task == "Supervised Learning":
         # PROCESSING
         # ==================================================
 
+        st.divider()
+
+        st.subheader(
+            "⚙️ Automated Processing"
+        )
+
+        st.caption(
+            "The pipeline will automatically preprocess the data, "
+            "engineer features."
+        )
+
         if (
             st.session_state.get("operation_error")
             and st.session_state.get("operation_error_kind") == "process"
@@ -1113,17 +1124,6 @@ if ml_task == "Supervised Learning":
         if st.session_state.get("operation_message"):
             st.success(st.session_state.operation_message)
             st.session_state.operation_message = None
-
-        st.divider()
-
-        st.subheader(
-            "⚙️ Automated Processing"
-        )
-
-        st.caption(
-            "The pipeline will automatically preprocess the data, "
-            "engineer features."
-        )
 
         if st.session_state.get("processing_running") and st.session_state.get("operation_kind") == "process":
             render_operation_lock(expected_kind="process")
@@ -1322,6 +1322,18 @@ if ml_task == "Supervised Learning":
             "training dataset and the learned parameters will "
             "then be applied to the test dataset."
         )
+
+        if (
+            st.session_state.get("operation_error")
+            and st.session_state.get("operation_error_kind") == "process"
+        ):
+            st.error(st.session_state.operation_error)
+            st.session_state.operation_error = None
+            st.session_state.operation_error_kind = None
+
+        if st.session_state.get("operation_message"):
+            st.success(st.session_state.operation_message)
+            st.session_state.operation_message = None
 
         if st.session_state.get("processing_running") and st.session_state.get("operation_kind") == "process":
             render_operation_lock(expected_kind="process")
@@ -1739,6 +1751,18 @@ else:
             "process categorical variables, transform skewed "
             "features and scale the resulting feature matrix."
         )
+
+        if (
+            st.session_state.get("operation_error")
+            and st.session_state.get("operation_error_kind") == "process"
+        ):
+            st.error(st.session_state.operation_error)
+            st.session_state.operation_error = None
+            st.session_state.operation_error_kind = None
+
+        if st.session_state.get("operation_message"):
+            st.success(st.session_state.operation_message)
+            st.session_state.operation_message = None
 
         if st.session_state.get("processing_running") and st.session_state.get("operation_kind") == "process":
             render_operation_lock(expected_kind="process")
