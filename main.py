@@ -1190,10 +1190,6 @@ h3 {{margin-top:26px}}
 <div class="container">
 <h1>📊 {mode} Exploratory Data Analysis Report</h1>
 <p><b>Dataset:</b> {html.escape(str(dataset_name))}<br><b>{target_text}</b></p>
-<p class="note">
-Generated from the uploaded EDA_supervised and EDA_unsupervised notebooks.
-No external EDA library is used. The uploaded dataset is not modified by this report.
-</p>
 {"".join(sections)}
 </div>
 </body>
